@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MQTT 4人即時元素競技場 (極速雙模版)</title>
+<title>MQTT 4人即時元素競技場 (極速雙模穩定版)</title>
 <style>
   body { font-family: 'Segoe UI', sans-serif; background: #1a2639; color: #fff; text-align: center; margin: 0; padding: 15px; }
   .header { margin-bottom: 12px; }
@@ -81,7 +81,6 @@
   <strong>🏆 即時戰績排行榜：</strong> <span id="rankText">尚無對戰紀錄</span>
 </div>
 
-<!-- 雙 CDN 備援載入 MQTT.js，防止單一 CDN 被擋導致整個網頁卡死 -->
 <script src="https://cdn.jsdelivr.net/npm/mqtt@5.3.5/dist/mqtt.min.js" onerror="loadBackupMqtt()"></script>
 <script>
   function loadBackupMqtt() {
@@ -96,7 +95,7 @@
 
   let mqttClient = null;
   let isCloudConnected = false;
-  let localChannel = null; // 瀏覽器原生跨分頁極速通道 (零延遲、免伺服器)
+  let localChannel = null;
 
   const userId = 'u_' + Math.random().toString(36).substr(2, 6);
   let mySeat = null;
@@ -107,6 +106,7 @@
   let roundPlays = {};
   let isRevealed = false;
   let scores = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  let judgeTimer = null; // 【修復重點1】防搶跑結算計時器
 
   document.getElementById('playerName').value = '高手_' + Math.floor(Math.random() * 900 + 100);
 
@@ -118,20 +118,16 @@
     document.getElementById('roomId').value = 'VIP_' + Math.floor(1000 + Math.random() * 9000);
   }
 
-  // 統一訊息廣播器：同時發送到「本機跨分頁通道」與「雲端 MQTT (若已連上)」
   function broadcastMessage(subTopic, payloadObj, retain = false) {
-    const fullTopic = `gemini/mqttgame5/${room}/${subTopic}`;
+    const fullTopic = `gemini/mqttgame6/${room}/${subTopic}`; // 升級頻道版本避開舊殘留訊息
     const payloadStr = payloadObj === null ? '' : JSON.stringify(payloadObj);
 
-    // 1. 立刻處理自己畫面
     handleIncomingMessage(fullTopic, payloadStr);
 
-    // 2. 廣播給同電腦其他分頁 (0.01秒同步，免伺服器)
     if (localChannel) {
       localChannel.postMessage({ topic: fullTopic, payload: payloadStr });
     }
 
-    // 3. 若雲端 MQTT 已連線，同步發送給遠端手機/朋友
     if (mqttClient && isCloudConnected) {
       mqttClient.publish(fullTopic, payloadStr, { qos: 1, retain: retain });
     }
@@ -140,6 +136,17 @@
   function handleIncomingMessage(topic, payload) {
     if (topic.endsWith('/reset')) {
       resetLocalState();
+      return;
+    }
+
+    // 【修復重點2】收到新玩家進房同步請求時，主動重送自己在座與出牌狀態
+    if (topic.endsWith('/sync_req')) {
+      if (mySeat && seatsData[mySeat]) {
+        broadcastMessage(`seat/${mySeat}`, seatsData[mySeat], true);
+        if (roundPlays[mySeat]) {
+          broadcastMessage(`play/${currentRound}/${mySeat}`, { card: roundPlays[mySeat] }, true);
+        }
+      }
       return;
     }
 
@@ -155,7 +162,7 @@
           document.getElementById('handControls').style.display = 'none';
         }
       }
-      checkRoundEnd();
+      scheduleCheckRoundEnd();
       renderTable();
     }
 
@@ -169,7 +176,7 @@
         } else {
           delete roundPlays[seatNum];
         }
-        checkRoundEnd();
+        scheduleCheckRoundEnd();
         renderTable();
       }
     }
@@ -178,6 +185,7 @@
       if (!payload) return;
       const data = JSON.parse(payload);
       if (data.round > currentRound) {
+        if (judgeTimer) clearTimeout(judgeTimer);
         currentRound = data.round;
         roundPlays = {};
         isRevealed = false;
@@ -191,6 +199,7 @@
   }
 
   function resetLocalState() {
+    if (judgeTimer) clearTimeout(judgeTimer);
     mySeat = null;
     seatsData = { 1: null, 2: null, 3: null, 4: null };
     roundPlays = {};
@@ -234,7 +243,10 @@
     mqttClient.on('connect', () => {
       isCloudConnected = true;
       document.getElementById('connStatus').innerText = `🟢 雲端 + 本機雙模已連線 | 包廂: ${room}`;
-      mqttClient.subscribe(`gemini/mqttgame5/${room}/#`);
+      mqttClient.subscribe(`gemini/mqttgame6/${room}/#`, () => {
+        // 連上後主動發出同步請求，確保抓到全桌狀態
+        broadcastMessage('sync_req', { from: userId }, false);
+      });
     });
 
     mqttClient.on('message', (topic, message) => {
@@ -252,6 +264,8 @@
 
     initLocalChannel();
     initMqttCloud();
+    // 本機通道也發送同步請求
+    setTimeout(() => broadcastMessage('sync_req', { from: userId }, false), 200);
   }
 
   function copyInviteLink() {
@@ -278,7 +292,11 @@
 
   function takeSeat(seatNum) {
     if (mySeat) {
-      alert('你已經在座位上了！');
+      alert('你已經在座位上了！若要換位請先按原本座位的「離座」。');
+      return;
+    }
+    if (seatsData[seatNum]) {
+      alert('這個座位剛剛有人入座了，請選其他空位！');
       return;
     }
     myName = document.getElementById('playerName').value.trim() || '無名氏';
@@ -336,6 +354,14 @@
     broadcastMessage(`play/${currentRound}/${mySeat}`, { card: card }, true);
   }
 
+  // 【修復重點1】緩衝檢查：等待 800ms 確保網路上所有玩家的出牌與入座封包都收齊，絕不因前兩人先到就搶先開牌
+  function scheduleCheckRoundEnd() {
+    if (judgeTimer) clearTimeout(judgeTimer);
+    judgeTimer = setTimeout(() => {
+      checkRoundEnd();
+    }, 800);
+  }
+
   function checkRoundEnd() {
     const activeSeats = Object.keys(seatsData).filter(s => seatsData[s] !== null);
     const playedSeats = activeSeats.filter(s => roundPlays[s] !== undefined);
@@ -344,6 +370,7 @@
       if (!isRevealed) {
         isRevealed = true;
         calculateWinner(activeSeats);
+        renderTable();
         document.getElementById('nextRoundBtn').style.display = 'inline-block';
       }
     }
@@ -408,7 +435,11 @@
           <button class="btn-kick" onclick="kickSeat(${i})">✖ ${kickLabel}</button>
         `;
       } else {
-        el.innerHTML = `<div>${posNames[i]} (空位)</div>` + (!mySeat ? `<button onclick="takeSeat(${i})">入座</button>` : '');
+        // 【修復重點3】若該分頁已入座，明確提示玩家目前坐在哪一席，避免誤以為按鈕消失
+        const hintHtml = mySeat
+          ? `<div style="font-size:11px; color:#a0aec0; margin-top:4px;">(你已在${posNames[mySeat]})</div>`
+          : `<button onclick="takeSeat(${i})">入座</button>`;
+        el.innerHTML = `<div>${posNames[i]} (空位)</div>${hintHtml}`;
       }
     }
 
