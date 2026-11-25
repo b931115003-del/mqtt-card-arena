@@ -3,60 +3,77 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MQTT 4人即時元素競技場</title>
+<title>MQTT 4人即時元素競技場 (進階版)</title>
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <style>
-  body { font-family: 'Segoe UI', sans-serif; background: #1a2639; color: #fff; text-align: center; margin: 0; padding: 20px; }
-  .header { margin-bottom: 20px; }
-  .status-bar { background: #2c3e50; padding: 8px 16px; border-radius: 20px; display: inline-block; font-size: 14px; }
-  .table { display: grid; grid-template-areas: ". top ." "left center right" ". bottom ."; gap: 15px; max-width: 700px; margin: 20px auto; background: #276749; padding: 30px; border-radius: 24px; border: 8px solid #5c3a21; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-  .seat { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 12px; min-height: 110px; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+  body { font-family: 'Segoe UI', sans-serif; background: #1a2639; color: #fff; text-align: center; margin: 0; padding: 15px; }
+  .header { margin-bottom: 15px; }
+  .status-bar { background: #2c3e50; padding: 6px 14px; border-radius: 20px; display: inline-block; font-size: 13px; }
+  .top-bar { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-bottom: 15px; }
+  input { padding: 8px 12px; border-radius: 6px; border: none; font-size: 14px; }
+  .table { display: grid; grid-template-areas: ". top ." "left center right" ". bottom ."; gap: 10px; max-width: 680px; margin: 15px auto; background: #276749; padding: 20px; border-radius: 20px; border: 6px solid #5c3a21; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+  .seat { background: rgba(0,0,0,0.35); padding: 10px; border-radius: 12px; min-height: 115px; display: flex; flex-direction: column; justify-content: center; align-items: center; position: relative; }
   .seat-1 { grid-area: bottom; border: 2px solid #ecc94b; }
   .seat-2 { grid-area: right; }
   .seat-3 { grid-area: top; }
   .seat-4 { grid-area: left; }
-  .center-zone { grid-area: center; background: rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; justify-content: center; }
-  .card-slot { width: 60px; height: 85px; background: #edf2f7; color: #1a202c; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 28px; margin-top: 8px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-  .card-back { background: repeating-linear-gradient(45deg, #c53030, #c53030 10px, #9b2c2c 10px, #9b2c2c 20px); color: transparent; }
-  .controls { margin-top: 20px; }
-  button { background: #3182ce; color: white; border: none; padding: 10px 20px; font-size: 16px; border-radius: 8px; cursor: pointer; margin: 5px; transition: 0.2s; }
-  button:hover { background: #2b6cb0; transform: translateY(-2px); }
-  button:disabled { background: #718096; cursor: not-allowed; transform: none; }
-  .card-btn { font-size: 24px; padding: 15px 25px; background: #2d3748; border: 2px solid #4a5568; }
+  .center-zone { grid-area: center; background: rgba(255,255,255,0.12); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; justify-content: center; min-width: 140px; }
+  .card-slot { width: 52px; height: 74px; background: #edf2f7; color: #1a202c; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 26px; margin-top: 6px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+  .card-back { background: repeating-linear-gradient(45deg, #c53030, #c53030 8px, #9b2c2c 8px, #9b2c2c 16px); color: transparent; }
+  .controls { margin-top: 15px; }
+  button { background: #3182ce; color: white; border: none; padding: 8px 16px; font-size: 14px; border-radius: 8px; cursor: pointer; margin: 3px; transition: 0.2s; }
+  button:hover:not(:disabled) { background: #2b6cb0; transform: translateY(-1px); }
+  button:disabled { background: #718096; cursor: not-allowed; opacity: 0.6; }
+  .btn-kick { background: #e53e3e; font-size: 11px; padding: 3px 8px; margin-top: 6px; border-radius: 4px; }
+  .btn-kick:hover { background: #c53030; }
+  .btn-bot { background: #805ad5; }
+  .btn-bot:hover { background: #6b46c1; }
+  .card-btn { font-size: 22px; padding: 12px 20px; background: #2d3748; border: 2px solid #4a5568; }
   .card-btn:hover:not(:disabled) { border-color: #ecc94b; background: #4a5568; }
-  .score-badge { background: #d69e2e; color: #1a202c; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: bold; margin-left: 5px; }
+  .score-badge { background: #d69e2e; color: #1a202c; padding: 2px 7px; border-radius: 10px; font-size: 12px; font-weight: bold; margin-left: 4px; }
+  .leaderboard { max-width: 680px; margin: 15px auto; background: rgba(0,0,0,0.25); padding: 12px; border-radius: 12px; font-size: 14px; }
+  @media (max-width: 600px) {
+    .table { padding: 12px; gap: 6px; }
+    .seat { padding: 6px; min-height: 100px; font-size: 13px; }
+    .center-zone { padding: 8px; min-width: 100px; font-size: 13px; }
+  }
 </style>
 </head>
 <body>
 
 <div class="header">
-  <h2>⚔️ MQTT 4人同桌元素競技場</h2>
+  <h2 style="margin:5px 0;">⚔️ MQTT 4人元素競技場</h2>
   <div class="status-bar" id="connStatus">連線至 MQTT Broker 中...</div>
 </div>
 
-<div>
-  <input type="text" id="playerName" placeholder="輸入你的暱稱" value="玩家" style="padding:8px; border-radius:6px; border:none;">
-  <input type="text" id="roomId" placeholder="房間代號" value="room888" style="padding:8px; border-radius:6px; border:none; width:100px;">
+<div class="top-bar">
+  <input type="text" id="playerName" placeholder="輸入暱稱" style="width:110px;">
+  <input type="text" id="roomId" placeholder="房間代號" value="room888" style="width:90px;">
   <button onclick="joinRoom()">進入房間</button>
+  <button class="btn-bot" onclick="addBot()">🤖 +電腦陪練</button>
 </div>
 
 <div class="table">
-  <div class="seat seat-3" id="seat-3"><div>北家 (空位)</div><button onclick="takeSeat(3)">入座</button></div>
-  <div class="seat seat-4" id="seat-4"><div>西家 (空位)</div><button onclick="takeSeat(4)">入座</button></div>
+  <div class="seat seat-3" id="seat-3"></div>
+  <div class="seat seat-4" id="seat-4"></div>
   <div class="center-zone">
-    <div id="roundDisplay" style="font-size:18px; font-weight:bold; color:#fbd38d;">等待玩家入座...</div>
-    <div id="resultDisplay" style="margin-top:10px; font-size:15px;"></div>
-    <button id="nextRoundBtn" onclick="nextRound()" style="display:none; margin-top:10px; background:#d69e2e;">下一局</button>
+    <div id="roundDisplay" style="font-weight:bold; color:#fbd38d;">等待入座...</div>
+    <div id="resultDisplay" style="margin-top:6px;"></div>
+    <button id="nextRoundBtn" onclick="nextRound()" style="display:none; margin-top:8px; background:#d69e2e; color:#1a202c; font-weight:bold;">下一局</button>
   </div>
-  <div class="seat seat-2" id="seat-2"><div>東家 (空位)</div><button onclick="takeSeat(2)">入座</button></div>
-  <div class="seat seat-1" id="seat-1"><div>南家 (空位)</div><button onclick="takeSeat(1)">入座</button></div>
+  <div class="seat seat-2" id="seat-2"></div>
+  <div class="seat seat-1" id="seat-1"></div>
 </div>
 
 <div class="controls" id="handControls" style="display:none;">
-  <p>請選擇本回合要打出的卡牌（🔥剋🌪️，🌪️剋💧，💧剋🔥）：</p>
+  <p style="margin:5px 0; font-size:14px;">選擇出牌（🔥剋🌪️，🌪️剋💧，💧剋🔥）：</p>
   <button class="card-btn" onclick="playCard('🔥')">🔥 火</button>
   <button class="card-btn" onclick="playCard('🌪️')">🌪️ 風</button>
   <button class="card-btn" onclick="playCard('💧')">💧 水</button>
+</div>
+
+<div class="leaderboard" id="leaderboard">
+  <strong>🏆 即時戰績排行榜：</strong> <span id="rankText">尚無對戰紀錄</span>
 </div>
 
 <script>
@@ -79,7 +96,15 @@
       if (topic.includes('/seat/')) {
         const seatNum = topic.split('/').pop();
         seatsData[seatNum] = payload ? JSON.parse(payload) : null;
-        if (!payload) scores[seatNum] = 0;
+        if (!payload) {
+          scores[seatNum] = 0;
+          delete roundPlays[seatNum];
+          if (mySeat == seatNum) {
+            mySeat = null;
+            document.getElementById('handControls').style.display = 'none';
+          }
+        }
+        checkRoundEnd();
         renderTable();
       }
       
@@ -104,6 +129,7 @@
           document.getElementById('nextRoundBtn').style.display = 'none';
           enableCards(true);
           renderTable();
+          triggerBotsPlay();
         }
       }
     });
@@ -112,9 +138,15 @@
   function joinRoom() {
     if (client) client.end();
     mySeat = null;
+    seatsData = { 1: null, 2: null, 3: null, 4: null };
     roundPlays = {};
+    scores = { 1: 0, 2: 0, 3: 0, 4: 0 };
     isRevealed = false;
+    currentRound = 1;
     document.getElementById('handControls').style.display = 'none';
+    document.getElementById('resultDisplay').innerText = '';
+    document.getElementById('nextRoundBtn').style.display = 'none';
+    
     room = document.getElementById('roomId').value.trim() || 'room888';
     const baseTopic = `gemini/mqttgame/${room}`;
     
@@ -148,11 +180,51 @@
 
     client.on('connect', () => {
       client.subscribe(`gemini/mqttgame/${room}/#`);
-      client.publish(seatTopic, JSON.stringify({ id: userId, name: name }), { qos: 1, retain: true });
+      client.publish(seatTopic, JSON.stringify({ id: userId, name: name, isBot: false }), { qos: 1, retain: true });
       document.getElementById('handControls').style.display = 'block';
+      enableCards(true);
     });
 
     bindClientEvents(client);
+  }
+
+  function kickSeat(seatNum) {
+    const seatTopic = `gemini/mqttgame/${room}/seat/${seatNum}`;
+    client.publish(seatTopic, '', { qos: 1, retain: true });
+  }
+
+  function addBot() {
+    const emptySeat = [1, 2, 3, 4].find(s => !seatsData[s]);
+    if (!emptySeat) {
+      alert('牌桌已經滿座囉！');
+      return;
+    }
+    const botNames = ['機器人Alpha', '機器人Beta', '機器人Gamma', 'AI棋王'];
+    const botName = botNames[emptySeat - 1];
+    const seatTopic = `gemini/mqttgame/${room}/seat/${emptySeat}`;
+    client.publish(seatTopic, JSON.stringify({ id: 'bot_' + emptySeat, name: botName, isBot: true }), { qos: 1, retain: true });
+    
+    setTimeout(() => {
+      if (!isRevealed && !roundPlays[emptySeat]) {
+        const cards = ['🔥', '🌪️', '💧'];
+        const pick = cards[Math.floor(Math.random() * cards.length)];
+        client.publish(`gemini/mqttgame/${room}/play/${currentRound}/${emptySeat}`, JSON.stringify({ card: pick }), { qos: 1 });
+      }
+    }, 800);
+  }
+
+  function triggerBotsPlay() {
+    [1, 2, 3, 4].forEach(s => {
+      if (seatsData[s] && seatsData[s].isBot) {
+        setTimeout(() => {
+          if (!isRevealed && !roundPlays[s]) {
+            const cards = ['🔥', '🌪️', '💧'];
+            const pick = cards[Math.floor(Math.random() * cards.length)];
+            client.publish(`gemini/mqttgame/${room}/play/${currentRound}/${s}`, JSON.stringify({ card: pick }), { qos: 1 });
+          }
+        }, 600 + s * 300);
+      }
+    });
   }
 
   function playCard(card) {
@@ -181,7 +253,7 @@
     let msg = '';
 
     if (uniqueCards.length === 1 || uniqueCards.length === 3) {
-      msg = '🤝 平手！元素相互抵銷！';
+      msg = '🤝 平手！元素抵銷！';
     } else {
       const winMap = { '🔥': '🌪️', '🌪️': '💧', '💧': '🔥' };
       const [c1, c2] = uniqueCards;
@@ -189,50 +261,6 @@
       const winnerSeats = activeSeats.filter(s => roundPlays[s] === winningCard);
       winnerSeats.forEach(s => { scores[s] = (scores[s] || 0) + 1; });
       const winners = winnerSeats.map(s => seatsData[s].name);
-      msg = `🏆 勝出元素：${winningCard} | 贏家：${winners.join(', ')}`;
+      msg = `🏆 勝：${winningCard}<br>贏家：${winners.join(', ')}`;
     }
-    document.getElementById('resultDisplay').innerText = msg;
-  }
-
-  function nextRound() {
-    client.publish(`gemini/mqttgame/${room}/next`, JSON.stringify({ round: currentRound + 1 }), { qos: 1 });
-  }
-
-  function enableCards(enable) {
-    document.querySelectorAll('.card-btn').forEach(btn => btn.disabled = !enable);
-  }
-
-  function renderTable() {
-    const posNames = { 1: '南家', 2: '東家', 3: '北家', 4: '西家' };
-    let activeCount = 0;
-
-    for (let i = 1; i <= 4; i++) {
-      const el = document.getElementById(`seat-${i}`);
-      const player = seatsData[i];
-      if (player) {
-        activeCount++;
-        let cardHtml = '<div style="margin-top:10px; font-size:13px; color:#cbd5e0;">思考中...</div>';
-        if (roundPlays[i]) {
-          if (isRevealed || i == mySeat) {
-            cardHtml = `<div class="card-slot">${roundPlays[i]}</div>`;
-          } else {
-            cardHtml = `<div class="card-slot card-back">蓋牌</div>`;
-          }
-        }
-        el.innerHTML = `<div><strong>${posNames[i]}</strong>: ${player.name}<span class="score-badge">${scores[i] || 0}勝</span></div>${cardHtml}`;
-      } else {
-        el.innerHTML = `<div>${posNames[i]} (空位)</div>` + (!mySeat ? `<button onclick="takeSeat(${i})">入座</button>` : '');
-      }
-    }
-
-    if (activeCount < 2) {
-      document.getElementById('roundDisplay').innerText = `第 ${currentRound} 局 (等待至少2人入座...)`;
-    } else {
-      document.getElementById('roundDisplay').innerText = isRevealed ? `第 ${currentRound} 局 開牌！` : `第 ${currentRound} 局 出牌中...`;
-    }
-  }
-
-  window.onload = joinRoom;
-</script>
-</body>
-</html>
+    document.
