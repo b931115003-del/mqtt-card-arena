@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MQTT 4人即時元素競技場 (邀請連結版)</title>
+<title>MQTT 4人即時元素競技場 (獨立包廂版)</title>
 <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
 <style>
   body { font-family: 'Segoe UI', sans-serif; background: #1a2639; color: #fff; text-align: center; margin: 0; padding: 15px; }
@@ -30,6 +30,8 @@
   .btn-bot:hover { background: #6b46c1; }
   .btn-invite { background: #38a169; font-weight: bold; }
   .btn-invite:hover { background: #2f855a; }
+  .btn-clear { background: #718096; }
+  .btn-clear:hover { background: #4a5568; }
   .card-btn { font-size: 22px; padding: 12px 20px; background: #2d3748; border: 2px solid #4a5568; }
   .card-btn:hover:not(:disabled) { border-color: #ecc94b; background: #4a5568; }
   .score-badge { background: #d69e2e; color: #1a202c; padding: 2px 7px; border-radius: 10px; font-size: 12px; font-weight: bold; margin-left: 4px; }
@@ -49,11 +51,12 @@
 </div>
 
 <div class="top-bar">
-  <input type="text" id="playerName" placeholder="輸入暱稱" style="width:100px;">
-  <input type="text" id="roomId" placeholder="房間代號" value="room888" style="width:85px;">
+  <input type="text" id="playerName" placeholder="輸入暱稱" style="width:95px;">
+  <input type="text" id="roomId" placeholder="房間代號" style="width:95px;">
   <button onclick="joinRoom()">進入房間</button>
   <button class="btn-invite" onclick="copyInviteLink()">🔗 複製邀請連結</button>
   <button class="btn-bot" onclick="addBot()">🤖 +電腦陪練</button>
+  <button class="btn-clear" onclick="clearTable()">🧹 清空整桌</button>
 </div>
 
 <div class="table">
@@ -85,7 +88,7 @@
   const userId = 'u_' + Math.random().toString(36).substr(2, 6);
   let mySeat = null;
   let myName = '';
-  let room = 'room888';
+  let room = '';
   let currentRound = 1;
   let seatsData = { 1: null, 2: null, 3: null, 4: null };
   let roundPlays = {};
@@ -95,36 +98,47 @@
   const BROKER_URL = 'wss://broker.hivemq.com:8884/mqtt';
   document.getElementById('playerName').value = '高手_' + Math.floor(Math.random() * 900 + 100);
 
-  // 讀取網址上的 ?room=xxx 參數，若有則自動填入房間代號
+  // 檢查網址是否有 ?room=xxx；若無，自動產生專屬隨機包廂號，避免與他人撞房
   const urlParams = new URLSearchParams(window.location.search);
   const invitedRoom = urlParams.get('room');
   if (invitedRoom) {
     document.getElementById('roomId').value = invitedRoom;
+  } else {
+    document.getElementById('roomId').value = 'VIP_' + Math.floor(1000 + Math.random() * 9000);
   }
 
   function copyInviteLink() {
-    const currentRoom = document.getElementById('roomId').value.trim() || 'room888';
+    const currentRoom = document.getElementById('roomId').value.trim();
     const inviteUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(currentRoom)}`;
     
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(inviteUrl).then(() => {
-        alert(`✅ 已複製房間 [${currentRoom}] 的專屬邀請連結！\n\n直接貼到 LINE 給朋友，他們點開就會自動進入同一桌：\n${inviteUrl}`);
+        alert(`✅ 已複製專屬包廂 [${currentRoom}] 邀請連結！\n\n傳給朋友點開後，就會直接進入你這桌：\n${inviteUrl}`);
       }).catch(() => {
-        prompt('請複製以下專屬邀請連結傳給朋友：', inviteUrl);
+        prompt('請複製以下邀請連結傳給朋友：', inviteUrl);
       });
     } else {
-      prompt('請複製以下專屬邀請連結傳給朋友：', inviteUrl);
+      prompt('請複製以下邀請連結傳給朋友：', inviteUrl);
     }
+  }
+
+  function clearTable() {
+    if (!isConnected) return;
+    if (!confirm('確定要清空整張牌桌（踢除所有座位並重置牌局）嗎？')) return;
+    mySeat = null;
+    document.getElementById('handControls').style.display = 'none';
+    for (let i = 1; i <= 4; i++) {
+      client.publish(`gemini/mqttgame3/${room}/seat/${i}`, '', { qos: 1, retain: true });
+      client.publish(`gemini/mqttgame3/${room}/play/${currentRound}/${i}`, '', { qos: 1, retain: true }); } client.publish(`gemini/mqttgame3/${room}/next`, '', { qos: 1, retain: true });
   }
 
   function bindClientEvents(mqttClient) {
     mqttClient.on('connect', () => {
       isConnected = true;
-      document.getElementById('connStatus').innerText = `🟢 已連線 | 房間: ${room}`;
-      mqttClient.subscribe(`gemini/mqttgame2/${room}/#`);
+      document.getElementById('connStatus').innerText = `🟢 已連線 | 專屬包廂: ${room}`; mqttClient.subscribe(`gemini/mqttgame3/${room}/#`);
       
       if (mySeat) {
-        const seatTopic = `gemini/mqttgame2/${room}/seat/${mySeat}`;
+        const seatTopic = `gemini/mqttgame3/${room}/seat/${mySeat}`;
         mqttClient.publish(seatTopic, JSON.stringify({ id: userId, name: myName, isBot: false }), { qos: 1, retain: true });
       }
     });
@@ -135,89 +149,7 @@
 
     mqttClient.on('error', (err) => {
       isConnected = false;
-      document.getElementById('connStatus').innerText = `🔴 連線異常: ${err.message}`;
-    });
-
-    mqttClient.on('message', (topic, message) => {
-      const payload = message.toString();
-      
-      if (topic.includes('/seat/')) {
-        const seatNum = topic.split('/').pop();
-        const parsed = payload ? JSON.parse(payload) : null;
-        
-        if (!parsed && mySeat == seatNum && isConnected) {
-          const seatTopic = `gemini/mqttgame2/${room}/seat/${mySeat}`;
-          mqttClient.publish(seatTopic, JSON.stringify({ id: userId, name: myName, isBot: false }), { qos: 1, retain: true });
-          return;
-        }
-
-        seatsData[seatNum] = parsed;
-        if (!parsed) {
-          scores[seatNum] = 0;
-          delete roundPlays[seatNum];
-          if (mySeat == seatNum) {
-            mySeat = null;
-            document.getElementById('handControls').style.display = 'none';
-          }
-        }
-        checkRoundEnd();
-        renderTable();
-      }
-      
-      if (topic.includes('/play/')) {
-        const parts = topic.split('/');
-        const round = parseInt(parts[parts.length - 2]);
-        const seatNum = parts[parts.length - 1];
-        if (round === currentRound) {
-          if (payload) {
-            roundPlays[seatNum] = JSON.parse(payload).card;
-          } else {
-            delete roundPlays[seatNum];
-          }
-          checkRoundEnd();
-          renderTable();
-        }
-      }
-
-      if (topic.endsWith('/next')) {
-        if (!payload) return;
-        const data = JSON.parse(payload);
-        if (data.round > currentRound) {
-          currentRound = data.round;
-          roundPlays = {};
-          isRevealed = false;
-          document.getElementById('resultDisplay').innerHTML = '';
-          document.getElementById('nextRoundBtn').style.display = 'none';
-          enableCards(true);
-          renderTable();
-          triggerBotsPlay();
-        }
-      }
-    });
-  }
-
-  function joinRoom() {
-    if (client) {
-      try { client.end(true); } catch(e) {}
-    }
-    isConnected = false;
-    mySeat = null;
-    seatsData = { 1: null, 2: null, 3: null, 4: null };
-    roundPlays = {};
-    scores = { 1: 0, 2: 0, 3: 0, 4: 0 };
-    isRevealed = false;
-    currentRound = 1;
-    document.getElementById('handControls').style.display = 'none';
-    document.getElementById('resultDisplay').innerHTML = '';
-    document.getElementById('nextRoundBtn').style.display = 'none';
-    renderTable();
-    
-    room = document.getElementById('roomId').value.trim() || 'room888';
-    // 同步更新瀏覽器網址列參數，方便直接複製網址列分享
-    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(room)}`;
-    window.history.replaceState({}, '', newUrl);
-
-    document.getElementById('connStatus').innerText = `🟡 正在進入房間 [${room}]...`;
+      document.getElementById('connStatus').innerText = `🔴 連線異常: ${err.message}`; });  mqttClient.on('message', (topic, message) => { const payload = message.toString();  if (topic.includes('/seat/')) { const seatNum = topic.split('/').pop(); const parsed = payload ? JSON.parse(payload) : null;  if (!parsed && mySeat == seatNum && isConnected) { const seatTopic = `gemini/mqttgame3/${room}/seat/${mySeat}`; mqttClient.publish(seatTopic, JSON.stringify({ id: userId, name: myName, isBot: false }), { qos: 1, retain: true }); return; }  seatsData[seatNum] = parsed; if (!parsed) { scores[seatNum] = 0; delete roundPlays[seatNum]; if (mySeat == seatNum) { mySeat = null; document.getElementById('handControls').style.display = 'none'; } } checkRoundEnd(); renderTable(); }  if (topic.includes('/play/')) { const parts = topic.split('/'); const round = parseInt(parts[parts.length - 2]); const seatNum = parts[parts.length - 1]; if (round === currentRound) { if (payload) { roundPlays[seatNum] = JSON.parse(payload).card; } else { delete roundPlays[seatNum]; } checkRoundEnd(); renderTable(); } }  if (topic.endsWith('/next')) { if (!payload) return; const data = JSON.parse(payload); if (data.round > currentRound) { currentRound = data.round; roundPlays = {}; isRevealed = false; document.getElementById('resultDisplay').innerHTML = ''; document.getElementById('nextRoundBtn').style.display = 'none'; enableCards(true); renderTable(); triggerBotsPlay(); } } }); }  function joinRoom() { if (client) { try { client.end(true); } catch(e) {} } isConnected = false; mySeat = null; seatsData = { 1: null, 2: null, 3: null, 4: null }; roundPlays = {}; scores = { 1: 0, 2: 0, 3: 0, 4: 0 }; isRevealed = false; currentRound = 1; document.getElementById('handControls').style.display = 'none'; document.getElementById('resultDisplay').innerHTML = ''; document.getElementById('nextRoundBtn').style.display = 'none'; renderTable();  room = document.getElementById('roomId').value.trim() \vert{}\vert{} ('VIP_' + Math.floor(1000 + Math.random() * 9000)); document.getElementById('roomId').value = room;  const newUrl = `${window.location.pathname}?room=${encodeURIComponent(room)}`; window.history.replaceState({}, '', newUrl);  document.getElementById('connStatus').innerText = `🟡 正在進入包廂 [${room}]...`;
     
     client = mqtt.connect(BROKER_URL, {
       clientId: userId,
@@ -240,7 +172,7 @@
     }
     myName = document.getElementById('playerName').value.trim() || '無名氏';
     mySeat = seatNum;
-    const seatTopic = `gemini/mqttgame2/${room}/seat/${seatNum}`;
+    const seatTopic = `gemini/mqttgame3/${room}/seat/${seatNum}`;
     
     client.publish(seatTopic, JSON.stringify({ id: userId, name: myName, isBot: false }), { qos: 1, retain: true });
     document.getElementById('handControls').style.display = 'block';
@@ -254,31 +186,9 @@
       mySeat = null;
       document.getElementById('handControls').style.display = 'none';
     }
-    const seatTopic = `gemini/mqttgame2/${room}/seat/${seatNum}`;
+    const seatTopic = `gemini/mqttgame3/${room}/seat/${seatNum}`;
     client.publish(seatTopic, '', { qos: 1, retain: true });
-    client.publish(`gemini/mqttgame2/${room}/play/${currentRound}/${seatNum}`, '', { qos: 1, retain: true });
-  }
-
-  function addBot() {
-    if (!isConnected) {
-      alert('請等上方顯示「🟢 已連線」後再加入電腦陪練！');
-      return;
-    }
-    const emptySeat = [1, 2, 3, 4].find(s => !seatsData[s]);
-    if (!emptySeat) {
-      alert('牌桌已經滿座囉！');
-      return;
-    }
-    const botNames = ['機器人Alpha', '機器人Beta', '機器人Gamma', 'AI棋王'];
-    const botName = botNames[emptySeat - 1];
-    const seatTopic = `gemini/mqttgame2/${room}/seat/${emptySeat}`;
-    client.publish(seatTopic, JSON.stringify({ id: 'bot_' + emptySeat, name: botName, isBot: true }), { qos: 1, retain: true });
-    
-    setTimeout(() => {
-      if (!isRevealed && !roundPlays[emptySeat]) {
-        const cards = ['🔥', '🌪️', '💧'];
-        const pick = cards[Math.floor(Math.random() * cards.length)];
-        client.publish(`gemini/mqttgame2/${room}/play/${currentRound}/${emptySeat}`, JSON.stringify({ card: pick }), { qos: 1, retain: true });
+    client.publish(`gemini/mqttgame3/${room}/play/${currentRound}/${seatNum}`, '', { qos: 1, retain: true }); }  function addBot() { if (!isConnected) { alert('請等上方顯示「🟢 已連線」後再加入電腦陪練！'); return; } const emptySeat = [1, 2, 3, 4].find(s => !seatsData[s]); if (!emptySeat) { alert('牌桌已經滿座囉！'); return; } const botNames = ['機器人Alpha', '機器人Beta', '機器人Gamma', 'AI棋王']; const botName = botNames[emptySeat - 1]; const seatTopic = `gemini/mqttgame3/${room}/seat/${emptySeat}`; client.publish(seatTopic, JSON.stringify({ id: 'bot_' + emptySeat, name: botName, isBot: true }), { qos: 1, retain: true });  setTimeout(() => { if (!isRevealed && !roundPlays[emptySeat]) { const cards = ['🔥', '🌪️', '💧']; const pick = cards[Math.floor(Math.random() * cards.length)]; client.publish(`gemini/mqttgame3/${room}/play/${currentRound}/${emptySeat}`, JSON.stringify({ card: pick }), { qos: 1, retain: true });
       }
     }, 800);
   }
@@ -290,20 +200,7 @@
           if (!isRevealed && !roundPlays[s]) {
             const cards = ['🔥', '🌪️', '💧'];
             const pick = cards[Math.floor(Math.random() * cards.length)];
-            client.publish(`gemini/mqttgame2/${room}/play/${currentRound}/${s}`, JSON.stringify({ card: pick }), { qos: 1, retain: true });
-          }
-        }, 600 + s * 300);
-      }
-    });
-  }
-
-  function playCard(card) {
-    if (!mySeat || roundPlays[mySeat]) return;
-    enableCards(false);
-    const seatTopic = `gemini/mqttgame2/${room}/seat/${mySeat}`;
-    client.publish(seatTopic, JSON.stringify({ id: userId, name: myName, isBot: false }), { qos: 1, retain: true });
-    
-    const playTopic = `gemini/mqttgame2/${room}/play/${currentRound}/${mySeat}`;
+            client.publish(`gemini/mqttgame3/${room}/play/${currentRound}/${s}`, JSON.stringify({ card: pick }), { qos: 1, retain: true }); } }, 600 + s * 300); } }); }  function playCard(card) { if (!mySeat \vert{}\vert{} roundPlays[mySeat]) return; enableCards(false); const seatTopic = `gemini/mqttgame3/${room}/seat/${mySeat}`; client.publish(seatTopic, JSON.stringify({ id: userId, name: myName, isBot: false }), { qos: 1, retain: true });  const playTopic = `gemini/mqttgame3/${room}/play/${currentRound}/${mySeat}`;
     client.publish(playTopic, JSON.stringify({ card: card }), { qos: 1, retain: true });
   }
 
@@ -328,79 +225,4 @@
     let msg = '';
 
     if (uniqueCards.length === 1 || uniqueCards.length === 3) {
-      msg = `🤝 平手！<br><span style="font-size:12px; color:#e2e8f0;">(${detailText})</span>`;
-    } else {
-      const winMap = { '🔥': '🌪️', '🌪️': '💧', '💧': '🔥' };
-      const [c1, c2] = uniqueCards;
-      const winningCard = winMap[c1] === c2 ? c1 : c2;
-      const winnerSeats = activeSeats.filter(s => roundPlays[s] === winningCard);
-      winnerSeats.forEach(s => { scores[s] = (scores[s] || 0) + 1; });
-      const winners = winnerSeats.map(s => seatsData[s].name);
-      msg = `🏆 勝：${winningCard} (${winners.join(', ')})<br><span style="font-size:12px; color:#e2e8f0;">[${detailText}]</span>`;
-    }
-    document.getElementById('resultDisplay').innerHTML = msg;
-  }
-
-  function nextRound() {
-    const nextR = currentRound + 1;
-    [1, 2, 3, 4].forEach(s => {
-      client.publish(`gemini/mqttgame2/${room}/play/${currentRound}/${s}`, '', { qos: 1, retain: true });
-    });
-    client.publish(`gemini/mqttgame2/${room}/next`, JSON.stringify({ round: nextR }), { qos: 1, retain: true });
-  }
-
-  function enableCards(enable) {
-    document.querySelectorAll('.card-btn').forEach(btn => btn.disabled = !enable);
-  }
-
-  function renderTable() {
-    const posNames = { 1: '南家', 2: '東家', 3: '北家', 4: '西家' };
-    let activeCount = 0;
-    let rankList = [];
-
-    for (let i = 1; i <= 4; i++) {
-      const el = document.getElementById(`seat-${i}`);
-      const player = seatsData[i];
-      if (player) {
-        activeCount++;
-        rankList.push({ name: player.name, score: scores[i] || 0 });
-        let cardHtml = '<div style="margin-top:8px; font-size:12px; color:#cbd5e0;">思考中...</div>';
-        if (roundPlays[i]) {
-          if (isRevealed || i == mySeat) {
-            cardHtml = `<div class="card-slot">${roundPlays[i]}</div>`;
-          } else {
-            cardHtml = `<div class="card-slot card-back">蓋牌</div>`;
-          }
-        }
-        const kickLabel = (i == mySeat) ? '離座' : '踢除';
-        el.innerHTML = `
-          <div><strong>${posNames[i]}</strong>: ${player.name}<span class="score-badge">${scores[i] || 0}勝</span></div>
-          ${cardHtml}
-          <button class="btn-kick" onclick="kickSeat(${i})">✖ ${kickLabel}</button>
-        `;
-      } else {
-        el.innerHTML = `<div>${posNames[i]} (空位)</div>` + (!mySeat ? `<button onclick="takeSeat(${i})">入座</button>` : '');
-      }
-    }
-
-    if (rankList.length > 0) {
-      rankList.sort((a, b) => b.score - a.score);
-      document.getElementById('rankText').innerText = rankList.map((r, idx) => `${idx === 0 && r.score > 0 ? '👑' : ''}${r.name} (${r.score}勝)`).join('  |  ');
-    } else {
-      document.getElementById('rankText').innerText = '尚無對戰紀錄';
-    }
-
-    if (activeCount < 2) {
-      document.getElementById('roundDisplay').innerText = `第 ${currentRound} 局 (等2人入座)`;
-    } else {
-      document.getElementById('roundDisplay').innerText = isRevealed ? `第 ${currentRound} 局 開牌！` : `第 ${currentRound} 局 出牌中`;
-    }
-  }
-
-  window.onload = () => {
-    renderTable();
-    joinRoom();
-  };
-</script>
-</body>
-</html>
+      msg = `🤝 平手！<br><span style="font-size:
