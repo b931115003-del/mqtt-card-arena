@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MQTT 4人即時元素競技場 (進階版)</title>
-<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<title>MQTT 4人即時元素競技場</title>
+<script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
 <style>
   body { font-family: 'Segoe UI', sans-serif; background: #1a2639; color: #fff; text-align: center; margin: 0; padding: 15px; }
-  .header { margin-bottom: 15px; }
+  .header { margin-bottom: 12px; }
   .status-bar { background: #2c3e50; padding: 6px 14px; border-radius: 20px; display: inline-block; font-size: 13px; }
   .top-bar { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-bottom: 15px; }
   input { padding: 8px 12px; border-radius: 6px; border: none; font-size: 14px; }
@@ -43,7 +43,7 @@
 
 <div class="header">
   <h2 style="margin:5px 0;">⚔️ MQTT 4人元素競技場</h2>
-  <div class="status-bar" id="connStatus">連線至 MQTT Broker 中...</div>
+  <div class="status-bar" id="connStatus">🟡 準備連線至伺服器...</div>
 </div>
 
 <div class="top-bar">
@@ -54,15 +54,15 @@
 </div>
 
 <div class="table">
-  <div class="seat seat-3" id="seat-3"></div>
-  <div class="seat seat-4" id="seat-4"></div>
+  <div class="seat seat-3" id="seat-3"><div>北家 (空位)</div><button onclick="takeSeat(3)">入座</button></div>
+  <div class="seat seat-4" id="seat-4"><div>西家 (空位)</div><button onclick="takeSeat(4)">入座</button></div>
   <div class="center-zone">
-    <div id="roundDisplay" style="font-weight:bold; color:#fbd38d;">等待入座...</div>
+    <div id="roundDisplay" style="font-weight:bold; color:#fbd38d;">第 1 局 (等2人入座)</div>
     <div id="resultDisplay" style="margin-top:6px;"></div>
     <button id="nextRoundBtn" onclick="nextRound()" style="display:none; margin-top:8px; background:#d69e2e; color:#1a202c; font-weight:bold;">下一局</button>
   </div>
-  <div class="seat seat-2" id="seat-2"></div>
-  <div class="seat seat-1" id="seat-1"></div>
+  <div class="seat seat-2" id="seat-2"><div>東家 (空位)</div><button onclick="takeSeat(2)">入座</button></div>
+  <div class="seat seat-1" id="seat-1"><div>南家 (空位)</div><button onclick="takeSeat(1)">入座</button></div>
 </div>
 
 <div class="controls" id="handControls" style="display:none;">
@@ -77,7 +77,8 @@
 </div>
 
 <script>
-  let client;
+  let client = null;
+  let isConnected = false;
   const userId = 'u_' + Math.random().toString(36).substr(2, 6);
   let mySeat = null;
   let room = 'room888';
@@ -87,9 +88,27 @@
   let isRevealed = false;
   let scores = { 1: 0, 2: 0, 3: 0, 4: 0 };
 
+  // 切換為穩定支援 WSS 加密連線的 HiveMQ 公共伺服器
+  const BROKER_URL = 'wss://broker.hivemq.com:8884/mqtt';
+
   document.getElementById('playerName').value = '高手_' + Math.floor(Math.random() * 900 + 100);
 
   function bindClientEvents(mqttClient) {
+    mqttClient.on('connect', () => {
+      isConnected = true;
+      document.getElementById('connStatus').innerText = `🟢 已連線 | 房間: ${room}`;
+      mqttClient.subscribe(`gemini/mqttgame/${room}/#`);
+    });
+
+    mqttClient.on('reconnect', () => {
+      document.getElementById('connStatus').innerText = `🟡 重新連線中...`;
+    });
+
+    mqttClient.on('error', (err) => {
+      isConnected = false;
+      document.getElementById('connStatus').innerText = `🔴 連線異常: ${err.message}`;
+    });
+
     mqttClient.on('message', (topic, message) => {
       const payload = message.toString();
       
@@ -136,7 +155,10 @@
   }
 
   function joinRoom() {
-    if (client) client.end();
+    if (client) {
+      try { client.end(true); } catch(e) {}
+    }
+    isConnected = false;
     mySeat = null;
     seatsData = { 1: null, 2: null, 3: null, 4: null };
     roundPlays = {};
@@ -146,24 +168,30 @@
     document.getElementById('handControls').style.display = 'none';
     document.getElementById('resultDisplay').innerText = '';
     document.getElementById('nextRoundBtn').style.display = 'none';
+    renderTable();
     
     room = document.getElementById('roomId').value.trim() || 'room888';
-    const baseTopic = `gemini/mqttgame/${room}`;
+    document.getElementById('connStatus').innerText = `🟡 正在進入房間 [${room}]...`;
     
-    client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
-      clientId: userId,
-      clean: true
-    });
+    if (typeof mqtt === 'undefined') {
+      document.getElementById('connStatus').innerText = `🔴 MQTT 函式庫載入失敗，請檢查網路`;
+      return;
+    }
 
-    client.on('connect', () => {
-      document.getElementById('connStatus').innerText = `🟢 已連線 | 房間: ${room}`;
-      client.subscribe(`${baseTopic}/#`);
+    client = mqtt.connect(BROKER_URL, {
+      clientId: userId,
+      clean: true,
+      connectTimeout: 5000
     });
 
     bindClientEvents(client);
   }
 
   function takeSeat(seatNum) {
+    if (!isConnected) {
+      alert('尚未連線成功，請稍候 2 秒看到上方出現「🟢 已連線」再入座！');
+      return;
+    }
     if (mySeat) {
       alert('你已經在座位上了！');
       return;
@@ -172,13 +200,15 @@
     mySeat = seatNum;
     const seatTopic = `gemini/mqttgame/${room}/seat/${seatNum}`;
     
-    client.end();
-    client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+    try { client.end(true); } catch(e) {}
+    client = mqtt.connect(BROKER_URL, {
       clientId: userId,
       will: { topic: seatTopic, payload: '', qos: 1, retain: true }
     });
 
     client.on('connect', () => {
+      isConnected = true;
+      document.getElementById('connStatus').innerText = `🟢 已連線 | 房間: ${room}`;
       client.subscribe(`gemini/mqttgame/${room}/#`);
       client.publish(seatTopic, JSON.stringify({ id: userId, name: name, isBot: false }), { qos: 1, retain: true });
       document.getElementById('handControls').style.display = 'block';
@@ -189,11 +219,16 @@
   }
 
   function kickSeat(seatNum) {
+    if (!isConnected) return;
     const seatTopic = `gemini/mqttgame/${room}/seat/${seatNum}`;
     client.publish(seatTopic, '', { qos: 1, retain: true });
   }
 
   function addBot() {
+    if (!isConnected) {
+      alert('請等上方顯示「🟢 已連線」後再加入電腦陪練！');
+      return;
+    }
     const emptySeat = [1, 2, 3, 4].find(s => !seatsData[s]);
     if (!emptySeat) {
       alert('牌桌已經滿座囉！');
@@ -263,4 +298,65 @@
       const winners = winnerSeats.map(s => seatsData[s].name);
       msg = `🏆 勝：${winningCard}<br>贏家：${winners.join(', ')}`;
     }
-    document.
+    document.getElementById('resultDisplay').innerHTML = msg;
+  }
+
+  function nextRound() {
+    client.publish(`gemini/mqttgame/${room}/next`, JSON.stringify({ round: currentRound + 1 }), { qos: 1 });
+  }
+
+  function enableCards(enable) {
+    document.querySelectorAll('.card-btn').forEach(btn => btn.disabled = !enable);
+  }
+
+  function renderTable() {
+    const posNames = { 1: '南家', 2: '東家', 3: '北家', 4: '西家' };
+    let activeCount = 0;
+    let rankList = [];
+
+    for (let i = 1; i <= 4; i++) {
+      const el = document.getElementById(`seat-${i}`);
+      const player = seatsData[i];
+      if (player) {
+        activeCount++;
+        rankList.push({ name: player.name, score: scores[i] || 0 });
+        let cardHtml = '<div style="margin-top:8px; font-size:12px; color:#cbd5e0;">思考中...</div>';
+        if (roundPlays[i]) {
+          if (isRevealed || i == mySeat) {
+            cardHtml = `<div class="card-slot">${roundPlays[i]}</div>`;
+          } else {
+            cardHtml = `<div class="card-slot card-back">蓋牌</div>`;
+          }
+        }
+        const kickLabel = (i == mySeat) ? '離座' : '踢除殭屍';
+        el.innerHTML = `
+          <div><strong>${posNames[i]}</strong>: ${player.name}<span class="score-badge">${scores[i] || 0}勝</span></div>
+          ${cardHtml}
+          <button class="btn-kick" onclick="kickSeat(${i})">✖ ${kickLabel}</button>
+        `;
+      } else {
+        el.innerHTML = `<div>${posNames[i]} (空位)</div>` + (!mySeat ? `<button onclick="takeSeat(${i})">入座</button>` : '');
+      }
+    }
+
+    if (rankList.length > 0) {
+      rankList.sort((a, b) => b.score - a.score);
+      document.getElementById('rankText').innerText = rankList.map((r, idx) => `${idx === 0 && r.score > 0 ? '👑' : ''}${r.name} (${r.score}勝)`).join('  |  ');
+    } else {
+      document.getElementById('rankText').innerText = '尚無對戰紀錄';
+    }
+
+    if (activeCount < 2) {
+      document.getElementById('roundDisplay').innerText = `第 ${currentRound} 局 (等2人入座)`;
+    } else {
+      document.getElementById('roundDisplay').innerText = isRevealed ? `第 ${currentRound} 局 開牌！` : `第 ${currentRound} 局 出牌中`;
+    }
+  }
+
+  window.onload = () => {
+    renderTable();
+    joinRoom();
+  };
+</script>
+</body>
+</html>
