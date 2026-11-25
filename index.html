@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MQTT 4人即時元素競技場 (多伺服器自動備援版)</title>
+<title>MQTT 4人即時元素競技場 (同桌鎖定版)</title>
 <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
 <style>
   body { font-family: 'Segoe UI', sans-serif; background: #1a2639; color: #fff; text-align: center; margin: 0; padding: 15px; }
@@ -38,6 +38,7 @@
   .card-btn:hover:not(:disabled) { border-color: #ecc94b; background: #4a5568; }
   .score-badge { background: #d69e2e; color: #1a202c; padding: 2px 7px; border-radius: 10px; font-size: 12px; font-weight: bold; margin-left: 4px; }
   .leaderboard { max-width: 680px; margin: 15px auto; background: rgba(0,0,0,0.25); padding: 12px; border-radius: 12px; font-size: 14px; }
+  .hint-box { font-size: 12px; color: #fbd38d; margin-bottom: 10px; }
   @media (max-width: 600px) {
     .table { padding: 12px; gap: 6px; }
     .seat { padding: 6px; min-height: 105px; font-size: 13px; }
@@ -52,12 +53,14 @@
   <div class="status-bar" id="connStatus">🟡 準備連線至伺服器...</div>
 </div>
 
+<div class="hint-box">💡 跨設備同桌：請先點「🔗 複製邀請連結」傳給手機或朋友，或雙方輸入相同的「包廂代號」與連上同一台雲端伺服器</div>
+
 <div class="top-bar">
   <input type="text" id="playerName" placeholder="輸入暱稱" style="width:90px;">
-  <input type="text" id="roomId" placeholder="房間代號" style="width:90px;">
-  <button onclick="joinRoom()">進入房間</button>
-  <button class="btn-switch" onclick="switchBroker()">🔄 切換伺服器</button>
+  <input type="text" id="roomId" placeholder="包廂代號" style="width:90px;">
+  <button onclick="joinRoom(true)">進入包廂</button>
   <button class="btn-invite" onclick="copyInviteLink()">🔗 複製邀請連結</button>
+  <button class="btn-switch" onclick="switchBroker()">🔄 切換伺服器</button>
   <button class="btn-bot" onclick="addBot()">🤖 +電腦陪練</button>
   <button class="btn-clear" onclick="clearTable()">🧹 清空整桌</button>
 </div>
@@ -99,13 +102,13 @@
   let isRevealed = false;
   let scores = { 1: 0, 2: 0, 3: 0, 4: 0 };
 
-  // 三大公共免費 MQTT WSS 伺服器自動備援清單
   const BROKERS = [
     { name: 'EMQX雲端', url: 'wss://broker.emqx.io:8084/mqtt' },
     { name: 'HiveMQ雲端', url: 'wss://broker.hivemq.com:8884/mqtt' },
     { name: 'Mosquitto雲端', url: 'wss://test.mosquitto.org:8081/mqtt' }
   ];
   let brokerIndex = 0;
+  let isBrokerLocked = false; // 若透過邀請連結進來，鎖定與房主同一台伺服器
 
   document.getElementById('playerName').value = '高手_' + Math.floor(Math.random() * 900 + 100);
 
@@ -114,6 +117,7 @@
   const invitedBroker = urlParams.get('b');
   if (invitedBroker !== null && BROKERS[parseInt(invitedBroker)]) {
     brokerIndex = parseInt(invitedBroker);
+    isBrokerLocked = true;
   }
   if (invitedRoom) {
     document.getElementById('roomId').value = invitedRoom;
@@ -122,18 +126,18 @@
   }
 
   function switchBroker() {
+    isBrokerLocked = false;
     brokerIndex = (brokerIndex + 1) % BROKERS.length;
     joinRoom(true);
   }
 
   function copyInviteLink() {
     const currentRoom = document.getElementById('roomId').value.trim();
-    // 連同目前使用的伺服器編號一起帶入邀請連結，確保朋友連到同一台伺服器
     const inviteUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(currentRoom)}&b=${brokerIndex}`;
     
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(inviteUrl).then(() => {
-        alert(`✅ 已複製專屬包廂 [${currentRoom}] 邀請連結！\n\n傳給朋友點開後，就會直接進入你這桌：\n${inviteUrl}`);
+        alert(`✅ 已複製專屬包廂 [${currentRoom}] (${BROKERS[brokerIndex].name}) 邀請連結！\n\n傳給手機或朋友直接點開即可同桌：\n${inviteUrl}`);
       }).catch(() => {
         prompt('請複製以下邀請連結傳給朋友：', inviteUrl);
       });
@@ -167,8 +171,8 @@
       }
     });
 
-    mqttClient.on('error', (err) => {
-      console.warn('MQTT Error:', err);
+    mqttClient.on('reconnect', () => {
+      document.getElementById('connStatus').innerText = `🟡 網路波動，重新連回 ${currentBroker.name}...`;
     });
 
     mqttClient.on('message', (topic, message) => {
@@ -229,7 +233,7 @@
     });
   }
 
-  function joinRoom(isManualSwitch = false) {
+  function joinRoom(isManualAction = false) {
     if (connectTimer) clearTimeout(connectTimer);
     if (client) {
       try { client.end(true); } catch(e) {}
@@ -253,35 +257,32 @@
     const newUrl = `${window.location.pathname}?room=${encodeURIComponent(room)}&b=${brokerIndex}`;
     window.history.replaceState({}, '', newUrl);
 
-    document.getElementById('connStatus').innerText = `🟡 連線至 [${currentBroker.name}] 中...`;
+    document.getElementById('connStatus').innerText = `🟡 連線至 [${currentBroker.name}] 包廂 [${room}] 中...`;
     
-    if (typeof mqtt === 'undefined') {
-      document.getElementById('connStatus').innerText = `🔴 網路元件載入失敗，請重新整理網頁`;
-      return;
-    }
-
     client = mqtt.connect(currentBroker.url, {
       clientId: userId + '_' + Math.floor(Math.random()*100),
       clean: true,
       keepalive: 30,
-      reconnectPeriod: 0 // 關閉預設無限重試，改由下方 3.5 秒自動切換下一台備援伺服器
+      reconnectPeriod: isBrokerLocked ? 2000 : 0
     });
 
     bindClientEvents(client, currentBroker);
 
-    // 若 3.5 秒內未連上這台伺服器，自動跳轉下一台備援伺服器
-    connectTimer = setTimeout(() => {
-      if (!isConnected) {
-        brokerIndex = (brokerIndex + 1) % BROKERS.length;
-        document.getElementById('connStatus').innerText = `🟠 ${currentBroker.name} 繁忙，自動切換備援伺服器...`;
-        setTimeout(() => joinRoom(false), 400);
-      }
-    }, 3500);
+    // 只有在「非邀請連結鎖定狀態」下，4秒連不上才自動換伺服器，避免跟房主失散
+    if (!isBrokerLocked) {
+      connectTimer = setTimeout(() => {
+        if (!isConnected) {
+          brokerIndex = (brokerIndex + 1) % BROKERS.length;
+          document.getElementById('connStatus').innerText = `🟠 ${currentBroker.name} 繁忙，自動切換備援伺服器...`;
+          setTimeout(() => joinRoom(false), 400);
+        }
+      }, 4000);
+    }
   }
 
   function takeSeat(seatNum) {
     if (!isConnected) {
-      alert('正在自動切換最佳伺服器，請等 2 秒看到上方出現「🟢 已連線」再入座！');
+      alert('請等上方出現「🟢 已連線」後再點選入座！');
       return;
     }
     if (mySeat) {
@@ -449,7 +450,7 @@
 
   window.onload = () => {
     renderTable();
-    joinRoom();
+    joinRoom(false);
   };
 </script>
 </body>
