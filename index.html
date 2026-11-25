@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MQTT 4人即時元素競技場</title>
+<title>MQTT 4人即時元素競技場 (同步強化版)</title>
 <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
 <style>
   body { font-family: 'Segoe UI', sans-serif; background: #1a2639; color: #fff; text-align: center; margin: 0; padding: 15px; }
@@ -17,7 +17,7 @@
   .seat-2 { grid-area: right; }
   .seat-3 { grid-area: top; }
   .seat-4 { grid-area: left; }
-  .center-zone { grid-area: center; background: rgba(255,255,255,0.12); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; justify-content: center; min-width: 140px; }
+  .center-zone { grid-area: center; background: rgba(255,255,255,0.12); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; justify-content: center; min-width: 145px; }
   .card-slot { width: 52px; height: 74px; background: #edf2f7; color: #1a202c; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 26px; margin-top: 6px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
   .card-back { background: repeating-linear-gradient(45deg, #c53030, #c53030 8px, #9b2c2c 8px, #9b2c2c 16px); color: transparent; }
   .controls { margin-top: 15px; }
@@ -34,8 +34,8 @@
   .leaderboard { max-width: 680px; margin: 15px auto; background: rgba(0,0,0,0.25); padding: 12px; border-radius: 12px; font-size: 14px; }
   @media (max-width: 600px) {
     .table { padding: 12px; gap: 6px; }
-    .seat { padding: 6px; min-height: 100px; font-size: 13px; }
-    .center-zone { padding: 8px; min-width: 100px; font-size: 13px; }
+    .seat { padding: 6px; min-height: 105px; font-size: 13px; }
+    .center-zone { padding: 8px; min-width: 110px; font-size: 13px; }
   }
 </style>
 </head>
@@ -58,7 +58,7 @@
   <div class="seat seat-4" id="seat-4"><div>西家 (空位)</div><button onclick="takeSeat(4)">入座</button></div>
   <div class="center-zone">
     <div id="roundDisplay" style="font-weight:bold; color:#fbd38d;">第 1 局 (等2人入座)</div>
-    <div id="resultDisplay" style="margin-top:6px;"></div>
+    <div id="resultDisplay" style="margin-top:6px; line-height:1.4;"></div>
     <button id="nextRoundBtn" onclick="nextRound()" style="display:none; margin-top:8px; background:#d69e2e; color:#1a202c; font-weight:bold;">下一局</button>
   </div>
   <div class="seat seat-2" id="seat-2"><div>東家 (空位)</div><button onclick="takeSeat(2)">入座</button></div>
@@ -81,6 +81,7 @@
   let isConnected = false;
   const userId = 'u_' + Math.random().toString(36).substr(2, 6);
   let mySeat = null;
+  let myName = '';
   let room = 'room888';
   let currentRound = 1;
   let seatsData = { 1: null, 2: null, 3: null, 4: null };
@@ -88,20 +89,24 @@
   let isRevealed = false;
   let scores = { 1: 0, 2: 0, 3: 0, 4: 0 };
 
-  // 切換為穩定支援 WSS 加密連線的 HiveMQ 公共伺服器
   const BROKER_URL = 'wss://broker.hivemq.com:8884/mqtt';
-
   document.getElementById('playerName').value = '高手_' + Math.floor(Math.random() * 900 + 100);
 
   function bindClientEvents(mqttClient) {
     mqttClient.on('connect', () => {
       isConnected = true;
       document.getElementById('connStatus').innerText = `🟢 已連線 | 房間: ${room}`;
-      mqttClient.subscribe(`gemini/mqttgame/${room}/#`);
+      mqttClient.subscribe(`gemini/mqttgame2/${room}/#`);
+      
+      // 若手機斷線重連後發現自己原本有座位，自動補回座位防止被其他家忽略
+      if (mySeat) {
+        const seatTopic = `gemini/mqttgame2/${room}/seat/${mySeat}`;
+        mqttClient.publish(seatTopic, JSON.stringify({ id: userId, name: myName, isBot: false }), { qos: 1, retain: true });
+      }
     });
 
     mqttClient.on('reconnect', () => {
-      document.getElementById('connStatus').innerText = `🟡 重新連線中...`;
+      document.getElementById('connStatus').innerText = `🟡 網路波動，重新同步中...`;
     });
 
     mqttClient.on('error', (err) => {
@@ -112,10 +117,20 @@
     mqttClient.on('message', (topic, message) => {
       const payload = message.toString();
       
+      // 處理座位變動
       if (topic.includes('/seat/')) {
         const seatNum = topic.split('/').pop();
-        seatsData[seatNum] = payload ? JSON.parse(payload) : null;
-        if (!payload) {
+        const parsed = payload ? JSON.parse(payload) : null;
+        
+        // 防止手機短暫斷線觸發的舊清空訊號把自己踢掉
+        if (!parsed && mySeat == seatNum && isConnected) {
+          const seatTopic = `gemini/mqttgame2/${room}/seat/${mySeat}`;
+          mqttClient.publish(seatTopic, JSON.stringify({ id: userId, name: myName, isBot: false }), { qos: 1, retain: true });
+          return;
+        }
+
+        seatsData[seatNum] = parsed;
+        if (!parsed) {
           scores[seatNum] = 0;
           delete roundPlays[seatNum];
           if (mySeat == seatNum) {
@@ -127,24 +142,31 @@
         renderTable();
       }
       
+      // 處理出牌變動 (使用 retain 確保手機不會漏接)
       if (topic.includes('/play/')) {
         const parts = topic.split('/');
         const round = parseInt(parts[parts.length - 2]);
         const seatNum = parts[parts.length - 1];
-        if (round === currentRound && payload) {
-          roundPlays[seatNum] = JSON.parse(payload).card;
+        if (round === currentRound) {
+          if (payload) {
+            roundPlays[seatNum] = JSON.parse(payload).card;
+          } else {
+            delete roundPlays[seatNum];
+          }
           checkRoundEnd();
           renderTable();
         }
       }
 
+      // 處理換局同步
       if (topic.endsWith('/next')) {
+        if (!payload) return;
         const data = JSON.parse(payload);
         if (data.round > currentRound) {
           currentRound = data.round;
           roundPlays = {};
           isRevealed = false;
-          document.getElementById('resultDisplay').innerText = '';
+          document.getElementById('resultDisplay').innerHTML = '';
           document.getElementById('nextRoundBtn').style.display = 'none';
           enableCards(true);
           renderTable();
@@ -166,21 +188,17 @@
     isRevealed = false;
     currentRound = 1;
     document.getElementById('handControls').style.display = 'none';
-    document.getElementById('resultDisplay').innerText = '';
+    document.getElementById('resultDisplay').innerHTML = '';
     document.getElementById('nextRoundBtn').style.display = 'none';
     renderTable();
     
     room = document.getElementById('roomId').value.trim() || 'room888';
     document.getElementById('connStatus').innerText = `🟡 正在進入房間 [${room}]...`;
     
-    if (typeof mqtt === 'undefined') {
-      document.getElementById('connStatus').innerText = `🔴 MQTT 函式庫載入失敗，請檢查網路`;
-      return;
-    }
-
     client = mqtt.connect(BROKER_URL, {
       clientId: userId,
       clean: true,
+      keepalive: 30,
       connectTimeout: 5000
     });
 
@@ -196,32 +214,27 @@
       alert('你已經在座位上了！');
       return;
     }
-    const name = document.getElementById('playerName').value.trim() || '無名氏';
+    myName = document.getElementById('playerName').value.trim() || '無名氏';
     mySeat = seatNum;
-    const seatTopic = `gemini/mqttgame/${room}/seat/${seatNum}`;
+    const seatTopic = `gemini/mqttgame2/${room}/seat/${seatNum}`;
     
-    try { client.end(true); } catch(e) {}
-    client = mqtt.connect(BROKER_URL, {
-      clientId: userId,
-      will: { topic: seatTopic, payload: '', qos: 1, retain: true }
-    });
-
-    client.on('connect', () => {
-      isConnected = true;
-      document.getElementById('connStatus').innerText = `🟢 已連線 | 房間: ${room}`;
-      client.subscribe(`gemini/mqttgame/${room}/#`);
-      client.publish(seatTopic, JSON.stringify({ id: userId, name: name, isBot: false }), { qos: 1, retain: true });
-      document.getElementById('handControls').style.display = 'block';
-      enableCards(true);
-    });
-
-    bindClientEvents(client);
+    // 移除容易誤殺手機的 LWT，改用主動離座按鈕，確保手機切畫面不會被踢出牌局
+    client.publish(seatTopic, JSON.stringify({ id: userId, name: myName, isBot: false }), { qos: 1, retain: true });
+    document.getElementById('handControls').style.display = 'block';
+    enableCards(true);
+    renderTable();
   }
 
   function kickSeat(seatNum) {
     if (!isConnected) return;
-    const seatTopic = `gemini/mqttgame/${room}/seat/${seatNum}`;
+    if (seatNum == mySeat) {
+      mySeat = null;
+      document.getElementById('handControls').style.display = 'none';
+    }
+    const seatTopic = `gemini/mqttgame2/${room}/seat/${seatNum}`;
     client.publish(seatTopic, '', { qos: 1, retain: true });
+    // 同時清空該座位本局的出牌保留訊息
+    client.publish(`gemini/mqttgame2/${room}/play/${currentRound}/${seatNum}`, '', { qos: 1, retain: true });
   }
 
   function addBot() {
@@ -236,14 +249,14 @@
     }
     const botNames = ['機器人Alpha', '機器人Beta', '機器人Gamma', 'AI棋王'];
     const botName = botNames[emptySeat - 1];
-    const seatTopic = `gemini/mqttgame/${room}/seat/${emptySeat}`;
+    const seatTopic = `gemini/mqttgame2/${room}/seat/${emptySeat}`;
     client.publish(seatTopic, JSON.stringify({ id: 'bot_' + emptySeat, name: botName, isBot: true }), { qos: 1, retain: true });
     
     setTimeout(() => {
       if (!isRevealed && !roundPlays[emptySeat]) {
         const cards = ['🔥', '🌪️', '💧'];
         const pick = cards[Math.floor(Math.random() * cards.length)];
-        client.publish(`gemini/mqttgame/${room}/play/${currentRound}/${emptySeat}`, JSON.stringify({ card: pick }), { qos: 1 });
+        client.publish(`gemini/mqttgame2/${room}/play/${currentRound}/${emptySeat}`, JSON.stringify({ card: pick }), { qos: 1, retain: true });
       }
     }, 800);
   }
@@ -255,7 +268,7 @@
           if (!isRevealed && !roundPlays[s]) {
             const cards = ['🔥', '🌪️', '💧'];
             const pick = cards[Math.floor(Math.random() * cards.length)];
-            client.publish(`gemini/mqttgame/${room}/play/${currentRound}/${s}`, JSON.stringify({ card: pick }), { qos: 1 });
+            client.publish(`gemini/mqttgame2/${room}/play/${currentRound}/${s}`, JSON.stringify({ card: pick }), { qos: 1, retain: true });
           }
         }, 600 + s * 300);
       }
@@ -265,15 +278,20 @@
   function playCard(card) {
     if (!mySeat || roundPlays[mySeat]) return;
     enableCards(false);
-    const playTopic = `gemini/mqttgame/${room}/play/${currentRound}/${mySeat}`;
-    client.publish(playTopic, JSON.stringify({ card: card }), { qos: 1 });
+    // 出牌時順便確保自己的座位狀態存在
+    const seatTopic = `gemini/mqttgame2/${room}/seat/${mySeat}`;
+    client.publish(seatTopic, JSON.stringify({ id: userId, name: myName, isBot: false }), { qos: 1, retain: true });
+    
+    // 出牌改用 retain: true，保證手機端就算網路延遲也絕對收得到開牌結果
+    const playTopic = `gemini/mqttgame2/${room}/play/${currentRound}/${mySeat}`;
+    client.publish(playTopic, JSON.stringify({ card: card }), { qos: 1, retain: true });
   }
 
   function checkRoundEnd() {
     const activeSeats = Object.keys(seatsData).filter(s => seatsData[s] !== null);
-    const playedSeats = Object.keys(roundPlays);
+    const playedSeats = activeSeats.filter(s => roundPlays[s] !== undefined);
     
-    if (activeSeats.length >= 2 && activeSeats.every(s => playedSeats.includes(s))) {
+    if (activeSeats.length >= 2 && playedSeats.length === activeSeats.length) {
       if (!isRevealed) {
         isRevealed = true;
         calculateWinner(activeSeats);
@@ -283,12 +301,14 @@
   }
 
   function calculateWinner(activeSeats) {
+    const posShort = { 1: '南', 2: '東', 3: '北', 4: '西' };
     const cards = activeSeats.map(s => roundPlays[s]);
     const uniqueCards = [...new Set(cards)];
+    const detailText = activeSeats.map(s => `${posShort[s]}${roundPlays[s]}`).join(' ');
     let msg = '';
 
     if (uniqueCards.length === 1 || uniqueCards.length === 3) {
-      msg = '🤝 平手！元素抵銷！';
+      msg = `🤝 平手！<br><span style="font-size:12px; color:#e2e8f0;">(${detailText})</span>`;
     } else {
       const winMap = { '🔥': '🌪️', '🌪️': '💧', '💧': '🔥' };
       const [c1, c2] = uniqueCards;
@@ -296,13 +316,18 @@
       const winnerSeats = activeSeats.filter(s => roundPlays[s] === winningCard);
       winnerSeats.forEach(s => { scores[s] = (scores[s] || 0) + 1; });
       const winners = winnerSeats.map(s => seatsData[s].name);
-      msg = `🏆 勝：${winningCard}<br>贏家：${winners.join(', ')}`;
+      msg = `🏆 勝：${winningCard} (${winners.join(', ')})<br><span style="font-size:12px; color:#e2e8f0;">[${detailText}]</span>`;
     }
     document.getElementById('resultDisplay').innerHTML = msg;
   }
 
   function nextRound() {
-    client.publish(`gemini/mqttgame/${room}/next`, JSON.stringify({ round: currentRound + 1 }), { qos: 1 });
+    const nextR = currentRound + 1;
+    // 清除上一局的保留出牌紀錄，避免殘留
+    [1, 2, 3, 4].forEach(s => {
+      client.publish(`gemini/mqttgame2/${room}/play/${currentRound}/${s}`, '', { qos: 1, retain: true });
+    });
+    client.publish(`gemini/mqttgame2/${room}/next`, JSON.stringify({ round: nextR }), { qos: 1, retain: true });
   }
 
   function enableCards(enable) {
@@ -328,7 +353,7 @@
             cardHtml = `<div class="card-slot card-back">蓋牌</div>`;
           }
         }
-        const kickLabel = (i == mySeat) ? '離座' : '踢除殭屍';
+        const kickLabel = (i == mySeat) ? '離座' : '踢除';
         el.innerHTML = `
           <div><strong>${posNames[i]}</strong>: ${player.name}<span class="score-badge">${scores[i] || 0}勝</span></div>
           ${cardHtml}
