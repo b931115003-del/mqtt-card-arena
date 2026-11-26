@@ -3,42 +3,48 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MQTT 4人即時元素競技場 (極速雙模穩定版)</title>
+<title>MQTT 4人即時元素競技場 (四人滿編穩定版)</title>
 <style>
   body { font-family: 'Segoe UI', sans-serif; background: #1a2639; color: #fff; text-align: center; margin: 0; padding: 15px; }
   .header { margin-bottom: 12px; }
   .status-bar { background: #2c3e50; padding: 6px 14px; border-radius: 20px; display: inline-block; font-size: 13px; }
   .top-bar { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-bottom: 15px; }
-  input { padding: 8px 10px; border-radius: 6px; border: none; font-size: 14px; }
+  input { padding: 8px 10px; border-radius: 6px; border: none; font-size: 14px; font-weight: bold; text-align: center; }
   .table { display: grid; grid-template-areas: ". top ." "left center right" ". bottom ."; gap: 10px; max-width: 680px; margin: 15px auto; background: #276749; padding: 20px; border-radius: 20px; border: 6px solid #5c3a21; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-  .seat { background: rgba(0,0,0,0.35); padding: 10px; border-radius: 12px; min-height: 115px; display: flex; flex-direction: column; justify-content: center; align-items: center; position: relative; }
-  .seat-1 { grid-area: bottom; border: 2px solid #ecc94b; }
+  .seat { background: rgba(0,0,0,0.35); padding: 10px; border-radius: 12px; min-height: 118px; display: flex; flex-direction: column; justify-content: center; align-items: center; position: relative; border: 2px solid transparent; }
+  .seat.my-active-seat { border-color: #ecc94b; background: rgba(0,0,0,0.5); }
+  .seat-1 { grid-area: bottom; }
   .seat-2 { grid-area: right; }
   .seat-3 { grid-area: top; }
   .seat-4 { grid-area: left; }
-  .center-zone { grid-area: center; background: rgba(255,255,255,0.12); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; justify-content: center; min-width: 145px; }
+  .center-zone { grid-area: center; background: rgba(255,255,255,0.14); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; min-width: 150px; }
   .card-slot { width: 52px; height: 74px; background: #edf2f7; color: #1a202c; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 26px; margin-top: 6px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
   .card-back { background: repeating-linear-gradient(45deg, #c53030, #c53030 8px, #9b2c2c 8px, #9b2c2c 16px); color: transparent; }
-  .controls { margin-top: 15px; }
-  button { background: #3182ce; color: white; border: none; padding: 8px 12px; font-size: 13px; border-radius: 8px; cursor: pointer; margin: 2px; transition: 0.2s; }
+  .controls { margin-top: 15px; background: rgba(0,0,0,0.25); padding: 12px; border-radius: 14px; max-width: 500px; margin-left: auto; margin-right: auto; }
+  button { background: #3182ce; color: white; border: none; padding: 8px 12px; font-size: 13px; border-radius: 8px; cursor: pointer; margin: 2px; transition: 0.2s; font-weight: bold; }
   button:hover:not(:disabled) { background: #2b6cb0; transform: translateY(-1px); }
-  button:disabled { background: #718096; cursor: not-allowed; opacity: 0.6; }
+  button:disabled { background: #718096; cursor: not-allowed; opacity: 0.5; }
+  .btn-sit { background: #eab308; color: #1a202c; padding: 6px 16px; margin-top: 6px; }
+  .btn-sit:hover { background: #ca8a04; }
   .btn-kick { background: #e53e3e; font-size: 11px; padding: 3px 8px; margin-top: 6px; border-radius: 4px; }
   .btn-kick:hover { background: #c53030; }
   .btn-bot { background: #805ad5; }
   .btn-bot:hover { background: #6b46c1; }
-  .btn-invite { background: #38a169; font-weight: bold; }
+  .btn-invite { background: #38a169; }
   .btn-invite:hover { background: #2f855a; }
   .btn-clear { background: #718096; }
   .btn-clear:hover { background: #4a5568; }
-  .card-btn { font-size: 22px; padding: 12px 20px; background: #2d3748; border: 2px solid #4a5568; }
+  .btn-force { background: #dd6b20; font-size: 12px; margin-top: 8px; }
+  .btn-force:hover { background: #c05621; }
+  .card-btn { font-size: 20px; padding: 12px 18px; background: #2d3748; border: 2px solid #4a5568; margin: 0 4px; }
   .card-btn:hover:not(:disabled) { border-color: #ecc94b; background: #4a5568; }
   .score-badge { background: #d69e2e; color: #1a202c; padding: 2px 7px; border-radius: 10px; font-size: 12px; font-weight: bold; margin-left: 4px; }
   .leaderboard { max-width: 680px; margin: 15px auto; background: rgba(0,0,0,0.25); padding: 12px; border-radius: 12px; font-size: 14px; }
   @media (max-width: 600px) {
-    .table { padding: 12px; gap: 6px; }
-    .seat { padding: 6px; min-height: 105px; font-size: 13px; }
-    .center-zone { padding: 8px; min-width: 110px; font-size: 13px; }
+    .table { padding: 10px; gap: 6px; }
+    .seat { padding: 6px; min-height: 108px; font-size: 12px; }
+    .center-zone { padding: 8px; min-width: 115px; font-size: 12px; }
+    .card-btn { font-size: 18px; padding: 10px 14px; }
   }
 </style>
 </head>
@@ -50,8 +56,8 @@
 </div>
 
 <div class="top-bar">
-  <input type="text" id="playerName" placeholder="輸入暱稱" style="width:90px;">
-  <input type="text" id="roomId" placeholder="包廂代號" style="width:90px;">
+  <input type="text" id="playerName" placeholder="輸入暱稱" style="width:95px;" onchange="updateMyName()">
+  <input type="text" id="roomId" placeholder="包廂代號" style="width:95px;">
   <button onclick="joinRoom()">切換包廂</button>
   <button class="btn-invite" onclick="copyInviteLink()">🔗 複製邀請連結</button>
   <button class="btn-bot" onclick="addBot()">🤖 +電腦陪練</button>
@@ -59,22 +65,26 @@
 </div>
 
 <div class="table">
-  <div class="seat seat-3" id="seat-3"><div>北家 (空位)</div><button onclick="takeSeat(3)">入座</button></div>
-  <div class="seat seat-4" id="seat-4"><div>西家 (空位)</div><button onclick="takeSeat(4)">入座</button></div>
+  <div class="seat seat-3" id="seat-3"></div>
+  <div class="seat seat-4" id="seat-4"></div>
   <div class="center-zone">
-    <div id="roundDisplay" style="font-weight:bold; color:#fbd38d;">第 1 局 (等2人入座)</div>
+    <div id="roundDisplay" style="font-weight:bold; color:#fbd38d;">第 1 局 (等待4人入座)</div>
     <div id="resultDisplay" style="margin-top:6px; line-height:1.4;"></div>
-    <button id="nextRoundBtn" onclick="nextRound()" style="display:none; margin-top:8px; background:#d69e2e; color:#1a202c; font-weight:bold;">下一局</button>
+    <button id="forceJudgeBtn" class="btn-force" onclick="forceJudgeNow()" style="display:none;">⚡ 提前開牌結算</button>
+    <button id="nextRoundBtn" onclick="nextRound()" style="display:none; margin-top:8px; background:#d69e2e; color:#1a202c;">下一局</button>
   </div>
-  <div class="seat seat-2" id="seat-2"><div>東家 (空位)</div><button onclick="takeSeat(2)">入座</button></div>
-  <div class="seat seat-1" id="seat-1"><div>南家 (空位)</div><button onclick="takeSeat(1)">入座</button></div>
+  <div class="seat seat-2" id="seat-2"></div>
+  <div class="seat seat-1" id="seat-1"></div>
 </div>
 
-<div class="controls" id="handControls" style="display:none;">
-  <p style="margin:5px 0; font-size:14px;">選擇出牌（🔥剋🌪️，🌪️剋💧，💧剋🔥）：</p>
-  <button class="card-btn" onclick="playCard('🔥')">🔥 火</button>
-  <button class="card-btn" onclick="playCard('🌪️')">🌪️ 風</button>
-  <button class="card-btn" onclick="playCard('💧')">💧 水</button>
+<!-- 固定顯示出牌控制區，清楚提示目前狀態 -->
+<div class="controls" id="handControls">
+  <div id="handHint" style="margin-bottom:8px; font-size:14px; color:#fbd38d; font-weight:bold;">
+    👆 請先點擊牌桌上的「入座」按鈕加入戰局
+  </div>
+  <button class="card-btn" onclick="playCard('🔥')" disabled>🔥 火</button>
+  <button class="card-btn" onclick="playCard('🌪️')" disabled>🌪️ 風</button>
+  <button class="card-btn" onclick="playCard('💧')" disabled>💧 水</button>
 </div>
 
 <div class="leaderboard" id="leaderboard">
@@ -97,18 +107,18 @@
   let isCloudConnected = false;
   let localChannel = null;
 
-  const userId = 'u_' + Math.random().toString(36).substr(2, 6);
+  // 每次載入頁面都產生全新獨立 ID，徹底解決「複製分頁」導致編號重複的問題
+  const userId = 'u_' + Date.now().toString(36).slice(-4) + Math.random().toString(36).substr(2, 4);
   let mySeat = null;
-  let myName = '';
+  let myName = '高手_' + Math.floor(Math.random() * 900 + 100);
   let room = '';
   let currentRound = 1;
   let seatsData = { 1: null, 2: null, 3: null, 4: null };
   let roundPlays = {};
   let isRevealed = false;
   let scores = { 1: 0, 2: 0, 3: 0, 4: 0 };
-  let judgeTimer = null; // 【修復重點1】防搶跑結算計時器
 
-  document.getElementById('playerName').value = '高手_' + Math.floor(Math.random() * 900 + 100);
+  document.getElementById('playerName').value = myName;
 
   const urlParams = new URLSearchParams(window.location.search);
   const invitedRoom = urlParams.get('room');
@@ -119,7 +129,7 @@
   }
 
   function broadcastMessage(subTopic, payloadObj, retain = false) {
-    const fullTopic = `gemini/mqttgame6/${room}/${subTopic}`; // 升級頻道版本避開舊殘留訊息
+    const fullTopic = `gemini/mqttgame7/${room}/${subTopic}`; // 升級頻道版本清空舊殘留
     const payloadStr = payloadObj === null ? '' : JSON.stringify(payloadObj);
 
     handleIncomingMessage(fullTopic, payloadStr);
@@ -139,7 +149,6 @@
       return;
     }
 
-    // 【修復重點2】收到新玩家進房同步請求時，主動重送自己在座與出牌狀態
     if (topic.endsWith('/sync_req')) {
       if (mySeat && seatsData[mySeat]) {
         broadcastMessage(`seat/${mySeat}`, seatsData[mySeat], true);
@@ -151,33 +160,49 @@
     }
 
     if (topic.includes('/seat/')) {
-      const seatNum = topic.split('/').pop();
+      const seatNum = parseInt(topic.split('/').pop());
       const parsed = payload ? JSON.parse(payload) : null;
       seatsData[seatNum] = parsed;
+
+      // 確認自己是否真的在該座位上（防止複製分頁造成的狀態錯亂）
+      if (parsed && parsed.id === userId) {
+        mySeat = seatNum;
+      } else if (mySeat === seatNum) {
+        mySeat = null;
+      }
+
       if (!parsed) {
         scores[seatNum] = 0;
         delete roundPlays[seatNum];
-        if (mySeat == seatNum) {
-          mySeat = null;
-          document.getElementById('handControls').style.display = 'none';
-        }
       }
-      scheduleCheckRoundEnd();
+      checkRoundEnd();
       renderTable();
     }
 
     if (topic.includes('/play/')) {
       const parts = topic.split('/');
       const round = parseInt(parts[parts.length - 2]);
-      const seatNum = parts[parts.length - 1];
+      const seatNum = parseInt(parts[parts.length - 1]);
       if (round === currentRound) {
         if (payload) {
           roundPlays[seatNum] = JSON.parse(payload).card;
         } else {
           delete roundPlays[seatNum];
         }
-        scheduleCheckRoundEnd();
+        checkRoundEnd();
         renderTable();
+      }
+    }
+
+    if (topic.endsWith('/force_reveal')) {
+      if (!isRevealed) {
+        const activeSeats = Object.keys(seatsData).filter(s => seatsData[s] !== null);
+        const playedSeats = activeSeats.filter(s => roundPlays[s] !== undefined);
+        if (playedSeats.length >= 2) {
+          isRevealed = true;
+          calculateWinner(playedSeats);
+          renderTable();
+        }
       }
     }
 
@@ -185,13 +210,10 @@
       if (!payload) return;
       const data = JSON.parse(payload);
       if (data.round > currentRound) {
-        if (judgeTimer) clearTimeout(judgeTimer);
         currentRound = data.round;
         roundPlays = {};
         isRevealed = false;
         document.getElementById('resultDisplay').innerHTML = '';
-        document.getElementById('nextRoundBtn').style.display = 'none';
-        enableCards(true);
         renderTable();
         triggerBotsPlay();
       }
@@ -199,16 +221,13 @@
   }
 
   function resetLocalState() {
-    if (judgeTimer) clearTimeout(judgeTimer);
     mySeat = null;
     seatsData = { 1: null, 2: null, 3: null, 4: null };
     roundPlays = {};
     scores = { 1: 0, 2: 0, 3: 0, 4: 0 };
     isRevealed = false;
     currentRound = 1;
-    document.getElementById('handControls').style.display = 'none';
     document.getElementById('resultDisplay').innerHTML = '';
-    document.getElementById('nextRoundBtn').style.display = 'none';
     renderTable();
   }
 
@@ -243,8 +262,7 @@
     mqttClient.on('connect', () => {
       isCloudConnected = true;
       document.getElementById('connStatus').innerText = `🟢 雲端 + 本機雙模已連線 | 包廂: ${room}`;
-      mqttClient.subscribe(`gemini/mqttgame6/${room}/#`, () => {
-        // 連上後主動發出同步請求，確保抓到全桌狀態
+      mqttClient.subscribe(`gemini/mqttgame7/${room}/#`, () => {
         broadcastMessage('sync_req', { from: userId }, false);
       });
     });
@@ -264,8 +282,15 @@
 
     initLocalChannel();
     initMqttCloud();
-    // 本機通道也發送同步請求
     setTimeout(() => broadcastMessage('sync_req', { from: userId }, false), 200);
+  }
+
+  function updateMyName() {
+    myName = document.getElementById('playerName').value.trim() || '無名氏';
+    if (mySeat && seatsData[mySeat]) {
+      seatsData[mySeat].name = myName;
+      broadcastMessage(`seat/${mySeat}`, seatsData[mySeat], true);
+    }
   }
 
   function copyInviteLink() {
@@ -302,14 +327,11 @@
     myName = document.getElementById('playerName').value.trim() || '無名氏';
     mySeat = seatNum;
     broadcastMessage(`seat/${seatNum}`, { id: userId, name: myName, isBot: false }, true);
-    document.getElementById('handControls').style.display = 'block';
-    enableCards(true);
   }
 
   function kickSeat(seatNum) {
     if (seatNum == mySeat) {
       mySeat = null;
-      document.getElementById('handControls').style.display = 'none';
     }
     broadcastMessage(`seat/${seatNum}`, null, true);
     broadcastMessage(`play/${currentRound}/${seatNum}`, null, true);
@@ -349,29 +371,23 @@
   }
 
   function playCard(card) {
-    if (!mySeat || roundPlays[mySeat]) return;
-    enableCards(false);
+    if (!mySeat || roundPlays[mySeat] || isRevealed) return;
     broadcastMessage(`play/${currentRound}/${mySeat}`, { card: card }, true);
   }
 
-  // 【修復重點1】緩衝檢查：等待 800ms 確保網路上所有玩家的出牌與入座封包都收齊，絕不因前兩人先到就搶先開牌
-  function scheduleCheckRoundEnd() {
-    if (judgeTimer) clearTimeout(judgeTimer);
-    judgeTimer = setTimeout(() => {
-      checkRoundEnd();
-    }, 800);
+  function forceJudgeNow() {
+    broadcastMessage('force_reveal', { ts: Date.now() }, false);
   }
 
+  // ★ 核心修復：必須「4人全滿」且「4人都出牌」才自動開牌，絕不2人搶跑！
   function checkRoundEnd() {
     const activeSeats = Object.keys(seatsData).filter(s => seatsData[s] !== null);
     const playedSeats = activeSeats.filter(s => roundPlays[s] !== undefined);
     
-    if (activeSeats.length >= 2 && playedSeats.length === activeSeats.length) {
+    if (activeSeats.length === 4 && playedSeats.length === 4) {
       if (!isRevealed) {
         isRevealed = true;
         calculateWinner(activeSeats);
-        renderTable();
-        document.getElementById('nextRoundBtn').style.display = 'inline-block';
       }
     }
   }
@@ -412,13 +428,17 @@
   function renderTable() {
     const posNames = { 1: '南家', 2: '東家', 3: '北家', 4: '西家' };
     let activeCount = 0;
+    let playedCount = 0;
     let rankList = [];
 
     for (let i = 1; i <= 4; i++) {
       const el = document.getElementById(`seat-${i}`);
       const player = seatsData[i];
+      el.className = `seat seat-${i}` + (i == mySeat ? ' my-active-seat' : '');
+
       if (player) {
         activeCount++;
+        if (roundPlays[i]) playedCount++;
         rankList.push({ name: player.name, score: scores[i] || 0 });
         let cardHtml = '<div style="margin-top:8px; font-size:12px; color:#cbd5e0;">思考中...</div>';
         if (roundPlays[i]) {
@@ -435,11 +455,49 @@
           <button class="btn-kick" onclick="kickSeat(${i})">✖ ${kickLabel}</button>
         `;
       } else {
-        // 【修復重點3】若該分頁已入座，明確提示玩家目前坐在哪一席，避免誤以為按鈕消失
-        const hintHtml = mySeat
+        const btnOrHint = mySeat
           ? `<div style="font-size:11px; color:#a0aec0; margin-top:4px;">(你已在${posNames[mySeat]})</div>`
-          : `<button onclick="takeSeat(${i})">入座</button>`;
-        el.innerHTML = `<div>${posNames[i]} (空位)</div>${hintHtml}`;
+          : `<button class="btn-sit" onclick="takeSeat(${i})">入座</button>`;
+        el.innerHTML = `<div>${posNames[i]} (空位)</div>${btnOrHint}`;
+      }
+    }
+
+    // 更新底部出牌控制區與提示文字（永遠可見，不再消失）
+    const handHint = document.getElementById('handHint');
+    if (mySeat) {
+      if (isRevealed) {
+        handHint.innerText = `本局已開牌！請按中間「下一局」繼續`;
+        enableCards(false);
+      } else if (roundPlays[mySeat]) {
+        handHint.innerText = `✅ 你已出牌 (${roundPlays[mySeat]})，等待其他玩家 (${playedCount}/4)...`;
+        enableCards(false);
+      } else {
+        handHint.innerText = `🎮 你是【${posNames[mySeat]}】請選擇出牌（🔥剋🌪️，🌪️剋💧，💧剋🔥）：`;
+        enableCards(true);
+      }
+    } else {
+      enableCards(false);
+      handHint.innerText = activeCount >= 4
+        ? `👀 4席已滿（旁觀中，可點「踢除」騰出空位再入座）`
+        : `👆 請先點擊牌桌上的「入座」按鈕加入戰局 (${activeCount}/4)`;
+    }
+
+    // 更新中央狀態與按鈕
+    const forceBtn = document.getElementById('forceJudgeBtn');
+    const nextBtn = document.getElementById('nextRoundBtn');
+    if (isRevealed) {
+      document.getElementById('roundDisplay').innerText = `第 ${currentRound} 局 開牌！`;
+      forceBtn.style.display = 'none';
+      nextBtn.style.display = 'inline-block';
+    } else {
+      nextBtn.style.display = 'none';
+      if (activeCount < 4) {
+        document.getElementById('roundDisplay').innerText = `第 ${currentRound} 局 (等滿4人: ${activeCount}/4)`;
+        // 若不滿4人但已有2人以上出牌，提供手動提前開牌按鈕
+        forceBtn.style.display = (playedCount >= 2) ? 'inline-block' : 'none';
+      } else {
+        document.getElementById('roundDisplay').innerText = `第 ${currentRound} 局 出牌中 (${playedCount}/4)`;
+        forceBtn.style.display = 'none';
       }
     }
 
@@ -448,12 +506,6 @@
       document.getElementById('rankText').innerText = rankList.map((r, idx) => `${idx === 0 && r.score > 0 ? '👑' : ''}${r.name} (${r.score}勝)`).join('  |  ');
     } else {
       document.getElementById('rankText').innerText = '尚無對戰紀錄';
-    }
-
-    if (activeCount < 2) {
-      document.getElementById('roundDisplay').innerText = `第 ${currentRound} 局 (等2人入座)`;
-    } else {
-      document.getElementById('roundDisplay').innerText = isRevealed ? `第 ${currentRound} 局 開牌！` : `第 ${currentRound} 局 出牌中`;
     }
   }
 
