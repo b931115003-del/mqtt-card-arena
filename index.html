@@ -24,6 +24,8 @@
   button { background: #3182ce; color: white; border: none; padding: 8px 12px; font-size: 13px; border-radius: 8px; cursor: pointer; margin: 2px; transition: 0.2s; font-weight: bold; }
   button:hover:not(:disabled) { background: #2b6cb0; transform: translateY(-1px); }
   button:disabled { background: #718096; cursor: not-allowed; opacity: 0.5; }
+  .btn-new-room { background: #0d9488; }
+  .btn-new-room:hover { background: #0f766e; }
   .btn-sit { background: #eab308; color: #1a202c; padding: 6px 16px; margin-top: 6px; }
   .btn-sit:hover { background: #ca8a04; }
   .btn-kick { background: #e53e3e; font-size: 11px; padding: 3px 8px; margin-top: 6px; border-radius: 4px; }
@@ -57,8 +59,9 @@
 
 <div class="top-bar">
   <input type="text" id="playerName" placeholder="輸入暱稱" style="width:95px;" onchange="updateMyName()">
-  <input type="text" id="roomId" placeholder="包廂代號" style="width:95px;">
+  <input type="text" id="roomId" placeholder="包廂代號" style="width:95px;" onkeydown="if(event.key==='Enter') joinRoom()">
   <button onclick="joinRoom()">切換包廂</button>
+  <button class="btn-new-room" onclick="createNewRandomRoom()">🎲 開新包廂</button>
   <button class="btn-invite" onclick="copyInviteLink()">🔗 複製邀請連結</button>
   <button class="btn-bot" onclick="addBot()">🤖 +電腦陪練</button>
   <button class="btn-clear" onclick="clearTable()">🧹 清空整桌</button>
@@ -77,7 +80,6 @@
   <div class="seat seat-1" id="seat-1"></div>
 </div>
 
-<!-- 固定顯示出牌控制區，清楚提示目前狀態 -->
 <div class="controls" id="handControls">
   <div id="handHint" style="margin-bottom:8px; font-size:14px; color:#fbd38d; font-weight:bold;">
     👆 請先點擊牌桌上的「入座」按鈕加入戰局
@@ -98,7 +100,7 @@
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.3.5/mqtt.min.js';
     s.onload = () => initMqttCloud();
     s.onerror = () => {
-      document.getElementById('connStatus').innerText = `🟢 本機極速模式 (支援同電腦多分頁與AI陪練)`;
+      document.getElementById('connStatus').innerText = `🟢 本機極速模式 | 包廂: ${room}`;
     };
     document.head.appendChild(s);
   }
@@ -107,7 +109,6 @@
   let isCloudConnected = false;
   let localChannel = null;
 
-  // 每次載入頁面都產生全新獨立 ID，徹底解決「複製分頁」導致編號重複的問題
   const userId = 'u_' + Date.now().toString(36).slice(-4) + Math.random().toString(36).substr(2, 4);
   let mySeat = null;
   let myName = '高手_' + Math.floor(Math.random() * 900 + 100);
@@ -129,7 +130,7 @@
   }
 
   function broadcastMessage(subTopic, payloadObj, retain = false) {
-    const fullTopic = `gemini/mqttgame7/${room}/${subTopic}`; // 升級頻道版本清空舊殘留
+    const fullTopic = `gemini/mqttgame7/${room}/${subTopic}`;
     const payloadStr = payloadObj === null ? '' : JSON.stringify(payloadObj);
 
     handleIncomingMessage(fullTopic, payloadStr);
@@ -144,6 +145,9 @@
   }
 
   function handleIncomingMessage(topic, payload) {
+    // 嚴格過濾：只處理屬於「目前所在包廂」的訊息，防止舊包廂殘留封包干擾
+    if (!topic.startsWith(`gemini/mqttgame7/${room}/`)) return;
+
     if (topic.endsWith('/reset')) {
       resetLocalState();
       return;
@@ -164,7 +168,6 @@
       const parsed = payload ? JSON.parse(payload) : null;
       seatsData[seatNum] = parsed;
 
-      // 確認自己是否真的在該座位上（防止複製分頁造成的狀態錯亂）
       if (parsed && parsed.id === userId) {
         mySeat = seatNum;
       } else if (mySeat === seatNum) {
@@ -232,7 +235,10 @@
   }
 
   function initLocalChannel() {
-    if (localChannel) localChannel.close();
+    if (localChannel) {
+      localChannel.close();
+      localChannel = null;
+    }
     if ('BroadcastChannel' in window) {
       localChannel = new BroadcastChannel(`local_game_${room}`);
       localChannel.onmessage = (event) => {
@@ -247,19 +253,25 @@
       return;
     }
     if (mqttClient) {
-      try { mqttClient.end(true); } catch(e) {}
+      try {
+        mqttClient.removeAllListeners();
+        mqttClient.end(true);
+      } catch(e) {}
+      mqttClient = null;
     }
     isCloudConnected = false;
     document.getElementById('connStatus').innerText = `🟢 本機可玩 | 🟡 雲端連線中... (包廂: ${room})`;
 
+    const targetRoom = room;
     mqttClient = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
-      clientId: userId + '_' + Math.floor(Math.random()*1000),
+      clientId: userId + '_' + Math.floor(Math.random()*10000),
       clean: true,
       connectTimeout: 5000,
       reconnectPeriod: 3000
     });
 
     mqttClient.on('connect', () => {
+      if (room !== targetRoom) return;
       isCloudConnected = true;
       document.getElementById('connStatus').innerText = `🟢 雲端 + 本機雙模已連線 | 包廂: ${room}`;
       mqttClient.subscribe(`gemini/mqttgame7/${room}/#`, () => {
@@ -272,17 +284,32 @@
     });
   }
 
+  // 【修復重點】切換包廂：立刻清空畫面、更新包廂號碼與網址，並重新連線
   function joinRoom() {
-    resetLocalState();
-    room = document.getElementById('roomId').value.trim() || ('VIP_' + Math.floor(1000 + Math.random() * 9000));
+    const inputVal = document.getElementById('roomId').value.trim();
+    const nextRoom = inputVal || ('VIP_' + Math.floor(1000 + Math.random() * 9000));
+    
+    room = nextRoom;
     document.getElementById('roomId').value = room;
     
+    // 立刻清空目前牌桌與四人狀態，讓畫面瞬間切換成空白新包廂
+    resetLocalState();
+    
+    // 同步更新瀏覽器網址列
     const newUrl = `${window.location.pathname}?room=${encodeURIComponent(room)}`;
     window.history.replaceState({}, '', newUrl);
 
+    // 重新建立本機與雲端通道
     initLocalChannel();
     initMqttCloud();
     setTimeout(() => broadcastMessage('sync_req', { from: userId }, false), 200);
+  }
+
+  // 【新增功能】一鍵產生全新包廂號碼並切換過去
+  function createNewRandomRoom() {
+    const newCode = 'VIP_' + Math.floor(1000 + Math.random() * 9000);
+    document.getElementById('roomId').value = newCode;
+    joinRoom();
   }
 
   function updateMyName() {
@@ -379,7 +406,6 @@
     broadcastMessage('force_reveal', { ts: Date.now() }, false);
   }
 
-  // ★ 核心修復：必須「4人全滿」且「4人都出牌」才自動開牌，絕不2人搶跑！
   function checkRoundEnd() {
     const activeSeats = Object.keys(seatsData).filter(s => seatsData[s] !== null);
     const playedSeats = activeSeats.filter(s => roundPlays[s] !== undefined);
@@ -462,7 +488,6 @@
       }
     }
 
-    // 更新底部出牌控制區與提示文字（永遠可見，不再消失）
     const handHint = document.getElementById('handHint');
     if (mySeat) {
       if (isRevealed) {
@@ -482,7 +507,6 @@
         : `👆 請先點擊牌桌上的「入座」按鈕加入戰局 (${activeCount}/4)`;
     }
 
-    // 更新中央狀態與按鈕
     const forceBtn = document.getElementById('forceJudgeBtn');
     const nextBtn = document.getElementById('nextRoundBtn');
     if (isRevealed) {
@@ -493,7 +517,6 @@
       nextBtn.style.display = 'none';
       if (activeCount < 4) {
         document.getElementById('roundDisplay').innerText = `第 ${currentRound} 局 (等滿4人: ${activeCount}/4)`;
-        // 若不滿4人但已有2人以上出牌，提供手動提前開牌按鈕
         forceBtn.style.display = (playedCount >= 2) ? 'inline-block' : 'none';
       } else {
         document.getElementById('roundDisplay').innerText = `第 ${currentRound} 局 出牌中 (${playedCount}/4)`;
@@ -510,7 +533,6 @@
   }
 
   window.onload = () => {
-    renderTable();
     joinRoom();
   };
 </script>
